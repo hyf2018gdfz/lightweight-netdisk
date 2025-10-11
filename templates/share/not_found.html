@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>分享链接不存在 - 个人网盘</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <style>
+        .error-container {
+            max-width: 500px;
+            margin: 3rem auto;
+            padding: 2rem;
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+            text-align: center;
+        }
+        
+        .error-icon {
+            font-size: 4rem;
+            color: #dc3545;
+            margin-bottom: 1.5rem;
+        }
+        
+        .error-title {
+            color: #dc3545;
+            margin-bottom: 1rem;
+        }
+        
+        .error-message {
+            color: #666;
+            margin-bottom: 2rem;
+            line-height: 1.6;
+        }
+        
+        .suggestions {
+            background: #f8f9fa;
+            padding: 1.5rem;
+            border-radius: 6px;
+            text-align: left;
+            margin: 2rem 0;
+        }
+        
+        .suggestions h4 {
+            margin-top: 0;
+            color: #495057;
+        }
+        
+        .suggestions ul {
+            margin: 0;
+            padding-left: 1.5rem;
+        }
+        
+        .suggestions li {
+            margin: 0.5rem 0;
+            color: #666;
+        }
+    </style>
+</head>
+<body>
+    <div class="error-container">
+        <div class="error-icon">
+            <i class="fas fa-exclamation-triangle"></i>
+        </div>
+        
+        <h1 class="error-title">分享链接不存在</h1>
+        
+        <div class="error-message">
+            {{ message or "您访问的分享链接不存在或已被删除。" }}
+        </div>
+        
+        <div class="suggestions">
+            <h4>可能的原因：</h4>
+            <ul>
+                <li>分享链接地址输入错误</li>
+                <li>分享链接已被创建者删除</li>
+                <li>分享链接从未存在</li>
+            </ul>
+        </div>
+        
+        <div style="margin-top: 2rem;">
+            <button onclick="history.back()" class="btn btn-secondary">
+                <i class="fas fa-arrow-left"></i>
+                返回上一页
+            </button>
+        </div>
+        
+        <div class="footer-note" style="margin-top: 2rem; color: #666; font-size: 0.9rem;">
+            <i class="fas fa-info-circle"></i>
+            如有疑问，请联系分享链接的创建者
+        </div>
+    </div>
+</body>
+</html>

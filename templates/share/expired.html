@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>分享链接已失效 - 个人网盘</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <style>
+        .expired-container {
+            max-width: 500px;
+            margin: 3rem auto;
+            padding: 2rem;
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+            text-align: center;
+        }
+        
+        .expired-icon {
+            font-size: 4rem;
+            color: #ffc107;
+            margin-bottom: 1.5rem;
+        }
+        
+        .expired-title {
+            color: #856404;
+            margin-bottom: 1rem;
+        }
+        
+        .expired-message {
+            color: #666;
+            margin-bottom: 2rem;
+            line-height: 1.6;
+        }
+        
+        .info-box {
+            background: #fff3cd;
+            border: 1px solid #ffeaa7;
+            padding: 1.5rem;
+            border-radius: 6px;
+            text-align: left;
+            margin: 2rem 0;
+        }
+        
+        .info-box h4 {
+            margin-top: 0;
+            color: #856404;
+        }
+        
+        .info-box ul {
+            margin: 0.5rem 0 0 0;
+            padding-left: 1.5rem;
+        }
+        
+        .info-box li {
+            margin: 0.5rem 0;
+            color: #856404;
+        }
+    </style>
+</head>
+<body>
+    <div class="expired-container">
+        <div class="expired-icon">
+            <i class="fas fa-clock"></i>
+        </div>
+        
+        <h1 class="expired-title">分享链接已失效</h1>
+        
+        <div class="expired-message">
+            {{ message or "此分享链接已过期或下载次数已达上限。" }}
+        </div>
+        
+        <div class="info-box">
+            <h4>分享链接失效的可能原因：</h4>
+            <ul>
+                <li>分享链接已超过设定的过期时间</li>
+                <li>文件下载次数已达到上限</li>
+                <li>分享者已手动停用此链接</li>
+            </ul>
+        </div>
+        
+        <div style="margin-top: 2rem;">
+            <button onclick="history.back()" class="btn btn-secondary">
+                <i class="fas fa-arrow-left"></i>
+                返回上一页
+            </button>
+        </div>
+        
+        <div class="footer-note" style="margin-top: 2rem; color: #666; font-size: 0.9rem;">
+            <i class="fas fa-info-circle"></i>
+            如需重新获取文件，请联系分享者创建新的分享链接
+        </div>
+    </div>
+</body>
+</html>

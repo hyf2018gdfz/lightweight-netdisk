@@ -1,0 +1,436 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>文件分享 - {{ share.description or "个人网盘" }}</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <style>
+        .share-container {
+            max-width: 600px;
+            margin: 2rem auto;
+            padding: 2rem;
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+            text-align: center;
+        }
+        
+        .share-header {
+            margin-bottom: 2rem;
+        }
+        
+        .share-header .file-icon {
+            font-size: 3rem;
+            margin-bottom: 1rem;
+        }
+        
+        .share-info {
+            background: #f8f9fa;
+            padding: 1.5rem;
+            border-radius: 6px;
+            margin: 2rem 0;
+            text-align: left;
+        }
+        
+        .info-row {
+            margin: 0.5rem 0;
+            color: #666;
+        }
+        
+        .info-row strong {
+            color: #333;
+        }
+        
+        .password-section {
+            background: #fff3cd;
+            border: 1px solid #ffeaa7;
+            padding: 1.5rem;
+            border-radius: 6px;
+            margin: 2rem 0;
+        }
+        
+        .password-form {
+            margin: 1rem 0;
+        }
+        
+        .form-group {
+            margin: 1rem 0;
+            text-align: left;
+        }
+        
+        .form-group label {
+            display: block;
+            margin-bottom: 0.5rem;
+            font-weight: 500;
+        }
+        
+        .form-group input {
+            width: 100%;
+            padding: 0.75rem;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 1rem;
+        }
+        
+        .form-group input:focus {
+            outline: none;
+            border-color: #007bff;
+            box-shadow: 0 0 0 2px rgba(0, 123, 255, 0.25);
+        }
+        
+        .download-section {
+            margin: 2rem 0;
+        }
+        
+        .file-preview {
+            background: #f8f9fa;
+            border: 1px solid #ddd;
+            border-radius: 6px;
+            padding: 1rem;
+            margin: 1rem 0;
+            text-align: left;
+            max-height: 300px;
+            overflow-y: auto;
+        }
+        
+        .preview-image {
+            max-width: 100%;
+            max-height: 400px;
+            border-radius: 6px;
+        }
+        
+        .download-count {
+            color: #666;
+            font-size: 0.9rem;
+            margin-top: 1rem;
+        }
+        
+        .expire-warning {
+            background: #fff3cd;
+            color: #856404;
+            padding: 0.75rem;
+            border-radius: 6px;
+            margin: 1rem 0;
+        }
+        
+        .actions-section {
+            margin: 2rem 0;
+        }
+        
+        .alert {
+            padding: 0.75rem 1rem;
+            border-radius: 6px;
+            margin: 1rem 0;
+        }
+        
+        .alert-error {
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+        
+        .alert-success {
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+        
+        .btn-large {
+            padding: 0.75rem 2rem;
+            font-size: 1.1rem;
+        }
+        
+        .loading {
+            display: none;
+            text-align: center;
+            padding: 1rem;
+            color: #666;
+        }
+        
+        .spinner {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border: 2px solid #f3f3f3;
+            border-top: 2px solid #007bff;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin-right: 0.5rem;
+        }
+        
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body>
+    <div class="share-container">
+        <div class="share-header">
+            <div class="file-icon">{{ file.icon }}</div>
+            <h1>{{ file.name }}</h1>
+            {% if share.description %}
+            <p class="text-muted">{{ share.description }}</p>
+            {% endif %}
+        </div>
+        
+        <div class="share-info">
+            <div class="info-row">
+                <strong>文件大小：</strong>
+                {% if file.type == 'file' %}
+                    {{ file.formatted_size or (file.size | string + ' 字节') }}
+                {% else %}
+                    文件夹
+                {% endif %}
+            </div>
+            <div class="info-row">
+                <strong>分享者：</strong>
+                {{ share.creator }}
+            </div>
+            <div class="info-row">
+                <strong>分享时间：</strong>
+                {{ share.created_at.strftime('%Y年%m月%d日 %H:%M') }}
+            </div>
+            {% if share.expire_at %}
+            <div class="info-row">
+                <strong>过期时间：</strong>
+                {{ share.expire_at.strftime('%Y年%m月%d日 %H:%M') }}
+            </div>
+            {% endif %}
+        </div>
+        
+        <!-- 错误和成功提示 -->
+        <div class="alert alert-error" id="errorMessage" style="display: none;"></div>
+        <div class="alert alert-success" id="successMessage" style="display: none;"></div>
+        
+        {% if share.has_password %}
+        <!-- 密码验证部分 -->
+        <div class="password-section" id="passwordSection">
+            <h3><i class="fas fa-lock"></i> 此分享需要访问密码</h3>
+            <p class="text-muted">请输入分享者提供的访问密码</p>
+            
+            <div class="password-form">
+                <div class="form-group">
+                    <label for="sharePassword">访问密码</label>
+                    <input type="password" id="sharePassword" placeholder="请输入访问密码" 
+                           autocomplete="off" maxlength="50">
+                </div>
+                
+                <button type="button" class="btn btn-primary" onclick="verifyPassword()">
+                    <i class="fas fa-unlock"></i>
+                    验证密码
+                </button>
+            </div>
+        </div>
+        {% endif %}
+        
+        <!-- 加载状态 -->
+        <div class="loading" id="loadingIndicator">
+            <div class="spinner"></div>
+            正在验证...
+        </div>
+        
+        <!-- 文件操作部分 -->
+        <div class="actions-section" id="actionsSection" style="display: {% if not share.has_password %}block{% else %}none{% endif %};">
+            {% if file.can_preview %}
+            <div class="file-preview" id="previewSection">
+                {% if file.mime_type and file.mime_type.startswith('image/') %}
+                    <img src="/share/{{ share.share_id }}/preview" alt="文件预览" class="preview-image" 
+                         style="display: none;" id="previewImage">
+                {% endif %}
+                <div id="previewText" style="display: none;">
+                    <pre id="previewContent"></pre>
+                </div>
+                <div class="text-center">
+                    <button type="button" class="btn btn-secondary" onclick="previewFile()">
+                        <i class="fas fa-eye"></i> 预览文件
+                    </button>
+                </div>
+            </div>
+            {% endif %}
+            
+            <div class="download-section">
+                <button type="button" class="btn btn-primary btn-large" onclick="downloadFile()">
+                    <i class="fas fa-download"></i>
+                    下载文件
+                </button>
+            </div>
+        </div>
+        
+        {% if share.current_downloads > 0 %}
+        <div class="download-count">
+            已被下载 {{ share.current_downloads }} 次
+            {% if share.max_downloads %}
+                / {{ share.max_downloads }} 次
+            {% endif %}
+        </div>
+        {% endif %}
+        
+        <div class="footer-note" style="margin-top: 2rem; color: #666; font-size: 0.9rem;">
+            <i class="fas fa-info-circle"></i>
+            由个人网盘系统提供支持
+        </div>
+    </div>
+    
+    <script>
+        const shareId = '{{ share.share_id }}';
+        let accessPassword = '';
+        let isPasswordVerified = {% if not share.has_password %}true{% else %}false{% endif %};
+        
+        function showMessage(type, message) {
+            const errorEl = document.getElementById('errorMessage');
+            const successEl = document.getElementById('successMessage');
+            
+            // 隐藏所有消息
+            errorEl.style.display = 'none';
+            successEl.style.display = 'none';
+            
+            // 显示指定类型的消息
+            if (type === 'error') {
+                errorEl.textContent = message;
+                errorEl.style.display = 'block';
+            } else if (type === 'success') {
+                successEl.textContent = message;
+                successEl.style.display = 'block';
+            }
+            
+            // 5秒后自动隐藏
+            setTimeout(() => {
+                errorEl.style.display = 'none';
+                successEl.style.display = 'none';
+            }, 5000);
+        }
+        
+        function setLoading(loading) {
+            const loadingEl = document.getElementById('loadingIndicator');
+            loadingEl.style.display = loading ? 'block' : 'none';
+        }
+        
+        async function verifyPassword() {
+            const passwordInput = document.getElementById('sharePassword');
+            const password = passwordInput.value.trim();
+            
+            if (!password) {
+                showMessage('error', '请输入访问密码');
+                return;
+            }
+            
+            setLoading(true);
+            
+            try {
+                const response = await fetch(`/share/${shareId}/access`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        password: password
+                    })
+                });
+                
+                const data = await response.json();
+                
+                if (response.ok) {
+                    accessPassword = password;
+                    isPasswordVerified = true;
+                    
+                    // 隐藏密码表单，显示操作按钮
+                    document.getElementById('passwordSection').style.display = 'none';
+                    document.getElementById('actionsSection').style.display = 'block';
+                    
+                    showMessage('success', '密码验证成功！');
+                } else {
+                    showMessage('error', data.detail || '密码验证失败');
+                }
+            } catch (error) {
+                console.error('验证密码错误:', error);
+                showMessage('error', '网络错误，请稍后重试');
+            } finally {
+                setLoading(false);
+            }
+        }
+        
+        function downloadFile() {
+            let url = `/share/${shareId}/download`;
+            if (accessPassword) {
+                url += `?password=${encodeURIComponent(accessPassword)}`;
+            }
+            
+            // 创建隐藏的下载链接
+            const link = document.createElement('a');
+            link.href = url;
+            link.style.display = 'none';
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            
+            showMessage('success', '文件下载已开始');
+        }
+        
+        async function previewFile() {
+            if (!isPasswordVerified) {
+                showMessage('error', '请先验证访问密码');
+                return;
+            }
+            
+            setLoading(true);
+            
+            try {
+                let url = `/share/${shareId}/preview`;
+                if (accessPassword) {
+                    url += `?password=${encodeURIComponent(accessPassword)}`;
+                }
+                
+                const response = await fetch(url);
+                
+                if (response.ok) {
+                    const contentType = response.headers.get('content-type');
+                    
+                    if (contentType && contentType.startsWith('image/')) {
+                        // 图片预览
+                        const previewImage = document.getElementById('previewImage');
+                        if (previewImage) {
+                            previewImage.src = url;
+                            previewImage.style.display = 'block';
+                        }
+                    } else if (contentType && contentType.includes('application/json')) {
+                        // 文本预览
+                        const data = await response.json();
+                        const previewText = document.getElementById('previewText');
+                        const previewContent = document.getElementById('previewContent');
+                        if (previewText && previewContent) {
+                            previewContent.textContent = data.content;
+                            previewText.style.display = 'block';
+                        }
+                    }
+                } else {
+                    const data = await response.json();
+                    showMessage('error', data.detail || '预览失败');
+                }
+            } catch (error) {
+                console.error('预览文件错误:', error);
+                showMessage('error', '预览失败，请稍后重试');
+            } finally {
+                setLoading(false);
+            }
+        }
+        
+        // 回车键支持
+        document.addEventListener('DOMContentLoaded', function() {
+            const passwordInput = document.getElementById('sharePassword');
+            if (passwordInput) {
+                passwordInput.addEventListener('keypress', function(e) {
+                    if (e.key === 'Enter') {
+                        verifyPassword();
+                    }
+                });
+                
+                // 自动聚焦
+                passwordInput.focus();
+            }
+        });
+    </script>
+</body>
+</html>
