@@ -90,17 +90,6 @@ async def create_default_user():
         db.commit()
         db.refresh(default_user)
         
-        # 创建根目录
-        root_dir = FileNode(
-            name="/",
-            path="/",
-            full_path="/",
-            node_type="directory",
-            owner_id=default_user.id,
-            parent_id=None
-        )
-        
-        db.add(root_dir)
-        db.commit()
+        # 根目录不需要在数据库中创建节点，它是虚拟的
         
         print("✅ 默认用户创建完成 (用户名: admin, 密码: admin123)")

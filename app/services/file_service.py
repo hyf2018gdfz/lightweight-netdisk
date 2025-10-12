@@ -46,6 +46,18 @@ class FileService:
     
     def get_children(self, parent_path: str, user: User, include_deleted: bool = False) -> List[FileNode]:
         """获取目录下的子节点"""
+        # 特殊处理根目录
+        if parent_path == "/":
+            # 根目录：查询所有parent_id为None的节点
+            query = self.db.query(FileNode).filter(
+                FileNode.parent_id.is_(None),
+                FileNode.owner_id == user.id
+            )
+            if not include_deleted:
+                query = query.filter(FileNode.is_deleted == False)
+            return query.order_by(FileNode.node_type.desc(), FileNode.name).all()
+        
+        # 非根目录：按原有逻辑处理
         parent_node = self.get_node_by_path(parent_path, user, include_deleted)
         if not parent_node or not parent_node.is_directory:
             return []
@@ -71,10 +83,13 @@ class FileService:
         dir_name = os.path.basename(path)
         
         # 获取父目录
-        parent_node = self.get_node_by_path(parent_path, user)
-        if not parent_node:
-            # 递归创建父目录
-            parent_node = self.create_directory(parent_path, user)
+        parent_id = None
+        if parent_path != "/":
+            parent_node = self.get_node_by_path(parent_path, user)
+            if not parent_node:
+                # 递归创建父目录
+                parent_node = self.create_directory(parent_path, user)
+            parent_id = parent_node.id
         
         # 创建物理目录
         physical_path = os.path.join(STORAGE_DIR, path.lstrip('/'))
@@ -86,7 +101,7 @@ class FileService:
             path=path,
             full_path=path,
             node_type='directory',
-            parent_id=parent_node.id,
+            parent_id=parent_id,
             owner_id=user.id
         )
         
@@ -98,6 +113,10 @@ class FileService:
     
     def ensure_directory_exists(self, path: str, user: User) -> FileNode:
         """确保目录存在，不存在则创建"""
+        # 根目录特殊处理：始终返回None（因为根目录没有parent_id）
+        if path == "/":
+            return None
+        
         node = self.get_node_by_path(path, user)
         if node:
             if not node.is_directory:
@@ -117,6 +136,7 @@ class FileService:
         
         # 确保父目录存在
         parent_node = self.ensure_directory_exists(parent_path, user)
+        parent_id = parent_node.id if parent_node else None
         
         # 创建物理文件
         physical_path = os.path.join(STORAGE_DIR, file_path.lstrip('/'))
@@ -146,7 +166,7 @@ class FileService:
             file_size=file_size,
             mime_type=mime_type,
             file_extension=file_extension,
-            parent_id=parent_node.id,
+            parent_id=parent_id,
             owner_id=user.id
         )
         

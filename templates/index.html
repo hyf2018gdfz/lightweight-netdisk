@@ -93,6 +93,16 @@
                     </div>
                     
                     <div class="toolbar-right">
+                        <div class="sort-dropdown">
+                            <select id="sortSelect" onchange="app.changeSortOrder()">
+                                <option value="name-asc">🔄 名称 A-Z</option>
+                                <option value="name-desc">🔄 名称 Z-A</option>
+                                <option value="date-desc">📅 时间新-旧</option>
+                                <option value="date-asc">📅 时间旧-新</option>
+                                <option value="size-desc">📊 大小大-小</option>
+                                <option value="size-asc">📊 大小小-大</option>
+                            </select>
+                        </div>
                         <button class="btn btn-ghost" onclick="showTrash()">
                             <i class="fas fa-trash"></i> 回收站
                         </button>

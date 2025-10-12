@@ -36,6 +36,14 @@ async def browse_directory(
     """浏览目录"""
     file_service = FileService(db)
     
+    # 验证目录是否存在（除了根目录）
+    if path != "/":
+        parent_node = file_service.get_node_by_path(path, current_user)
+        if not parent_node:
+            raise HTTPException(status_code=404, detail=f"目录不存在: {path}")
+        if not parent_node.is_directory:
+            raise HTTPException(status_code=400, detail=f"路径不是目录: {path}")
+    
     # 获取目录内容
     children = file_service.get_children(path, current_user)
     

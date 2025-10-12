@@ -81,7 +81,22 @@ app.include_router(share.router, prefix="/share", tags=["分享系统"])
 
 @app.get("/")
 async def index(request: Request):
-    """首页"""
+    """首页/根目录"""
+    return templates.TemplateResponse("index.html", {"request": request})
+
+
+@app.get("/trash")
+async def trash_page(request: Request):
+    """回收站页面"""
+    return templates.TemplateResponse("index.html", {"request": request})
+
+
+@app.get("/{path:path}")
+async def folder_path(request: Request, path: str):
+    """文件夹路径页面"""
+    # 避免与 API 路径冲突
+    if path.startswith(("auth/", "files/", "trash/", "share/", "health", "static/")):
+        raise HTTPException(status_code=404, detail="Not found")
     return templates.TemplateResponse("index.html", {"request": request})
 
 

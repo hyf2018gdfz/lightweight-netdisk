@@ -8,6 +8,7 @@ class NetdiskApp {
         this.selectedFiles = new Set();
         this.accessToken = localStorage.getItem('access_token');
         this.userInfo = null;
+        this.sortOrder = 'name-asc'; // 默认按名称升序排列
         
         this.init();
     }
@@ -68,7 +69,16 @@ class NetdiskApp {
             if (response.authenticated) {
                 this.userInfo = response.user;
                 this.showMainPage();
-                this.loadFileList();
+                this.initHistorySupport();
+                // 恢复排序设置
+                this.initSortOrder();
+                // 从 URL 获取初始路径并加载相应内容
+                this.currentPath = this.getPathFromUrl();
+                if (this.currentPath === '/trash') {
+                    this.showTrash(false); // 不更新 URL，因为已经在正确的 URL 上
+                } else {
+                    this.loadFileList(this.currentPath, false); // 不更新 URL，因为已经在正确的 URL 上
+                }
             } else {
                 this.logout();
             }
@@ -111,7 +121,16 @@ class NetdiskApp {
                 localStorage.setItem('user_info', JSON.stringify(this.userInfo));
                 
                 this.showMainPage();
-                this.loadFileList();
+                this.initHistorySupport();
+                // 恢复排序设置
+                this.initSortOrder();
+                // 从 URL 获取初始路径并加载相应内容
+                this.currentPath = this.getPathFromUrl();
+                if (this.currentPath === '/trash') {
+                    this.showTrash(false); // 不更新 URL，因为已经在正确的 URL 上
+                } else {
+                    this.loadFileList(this.currentPath, false); // 不更新 URL，因为已经在正确的 URL 上
+                }
             } else {
                 this.showAlert('loginError', data.detail || '登录失败');
             }
@@ -175,7 +194,7 @@ class NetdiskApp {
     }
     
     // 文件管理方法
-    async loadFileList(path = this.currentPath) {
+    async loadFileList(path = this.currentPath, updateUrl = true) {
         try {
             this.showLoading(true);
             const data = await this.api(`/files/browse?path=${encodeURIComponent(path)}`);
@@ -183,6 +202,11 @@ class NetdiskApp {
             this.currentPath = data.path;
             this.updateBreadcrumb(data.path, data.parent_path);
             this.renderFileList(data.items);
+            
+            // 更新浏览器URL
+            if (updateUrl) {
+                this.updateUrl(path);
+            }
             
         } catch (error) {
             console.error('Load file list error:', error);
@@ -192,23 +216,141 @@ class NetdiskApp {
         }
     }
     
+    updateUrl(path) {
+        const url = path === '/' ? '/' : path;
+        window.history.pushState({path: path}, '', url);
+    }
+    
+    // 从 URL 获取当前路径
+    getPathFromUrl() {
+        const pathname = window.location.pathname;
+        if (pathname === '/') {
+            return '/';
+        }
+        if (pathname === '/trash') {
+            return '/trash';
+        }
+        // 其他路径都是文件夹路径
+        return pathname;
+    }
+    
+    initHistorySupport() {
+        // 监听浏览器后退/前进按钮
+        window.addEventListener('popstate', (event) => {
+            if (event.state && event.state.path) {
+                this.currentPath = event.state.path;
+                if (this.currentPath === '/trash') {
+                    this.showTrash(false); // 不更新 URL，因为已经在正确的 URL 上
+                } else {
+                    this.loadFileList(this.currentPath, false); // 不更新 URL，因为已经在正确的 URL 上
+                }
+            } else {
+                // 如果没有状态，从 URL 获取路径
+                const path = this.getPathFromUrl();
+                this.currentPath = path;
+                if (path === '/trash') {
+                    this.showTrash(false); // 不更新 URL，因为已经在正确的 URL 上
+                } else {
+                    this.loadFileList(path, false);
+                }
+            }
+        });
+        
+        // 设置初始状态
+        window.history.replaceState({path: this.getPathFromUrl()}, '', window.location.pathname);
+    }
+    
+    initSortOrder() {
+        // 从本地存储恢复排序设置
+        const savedSortOrder = localStorage.getItem('sortOrder');
+        if (savedSortOrder) {
+            this.sortOrder = savedSortOrder;
+        }
+        
+        // 更新 UI 中的排序选择框
+        const sortSelect = document.getElementById('sortSelect');
+        if (sortSelect) {
+            sortSelect.value = this.sortOrder;
+        }
+    }
+    
     renderFileList(items) {
         const fileList = document.getElementById('fileList');
         const emptyState = document.getElementById('emptyState');
         
         if (items.length === 0) {
+            fileList.innerHTML = ''; // 清空文件列表内容
             fileList.style.display = 'none';
+            emptyState.innerHTML = `
+                <i class="fas fa-folder-open"></i>
+                <h3>文件夹为空</h3>
+                <p>您可以上传文件或创建新文件夹</p>
+            `;
             emptyState.style.display = 'block';
             return;
         }
         
+        // 按排序设置排列文件
+        const sortedItems = this.sortItems(items);
+        
         fileList.style.display = 'block';
         emptyState.style.display = 'none';
         
-        fileList.innerHTML = items.map(item => this.renderFileItem(item)).join('');
+        fileList.innerHTML = sortedItems.map(item => this.renderFileItem(item)).join('');
         
         // 绑定文件项事件
         this.bindFileItemEvents();
+    }
+    
+    sortItems(items) {
+        const [sortBy, order] = this.sortOrder.split('-');
+        
+        return [...items].sort((a, b) => {
+            let aValue, bValue;
+            
+            // 目录总是排在文件前面
+            if (a.type !== b.type) {
+                if (a.type === 'directory') return -1;
+                if (b.type === 'directory') return 1;
+            }
+            
+            switch (sortBy) {
+                case 'name':
+                    aValue = a.name.toLowerCase();
+                    bValue = b.name.toLowerCase();
+                    break;
+                case 'date':
+                    aValue = new Date(a.created_at).getTime();
+                    bValue = new Date(b.created_at).getTime();
+                    break;
+                case 'size':
+                    aValue = a.size || 0;
+                    bValue = b.size || 0;
+                    break;
+                default:
+                    aValue = a.name.toLowerCase();
+                    bValue = b.name.toLowerCase();
+            }
+            
+            if (aValue < bValue) {
+                return order === 'asc' ? -1 : 1;
+            }
+            if (aValue > bValue) {
+                return order === 'asc' ? 1 : -1;
+            }
+            return 0;
+        });
+    }
+    
+    changeSortOrder() {
+        const sortSelect = document.getElementById('sortSelect');
+        this.sortOrder = sortSelect.value;
+        
+        // 保存排序设置到本地存储
+        localStorage.setItem('sortOrder', this.sortOrder);
+        
+        // 重新渲染当前文件列表
+        this.loadFileList(this.currentPath, false);
     }
     
     renderFileItem(item) {
@@ -243,10 +385,15 @@ class NetdiskApp {
             item.addEventListener('dblclick', () => {
                 const type = item.dataset.type;
                 const name = item.dataset.name;
+                const id = item.dataset.id;
                 
                 if (type === 'directory') {
+                    // 双击目录：进入目录
                     const newPath = this.currentPath === '/' ? `/${name}` : `${this.currentPath}/${name}`;
                     this.loadFileList(newPath);
+                } else if (type === 'file') {
+                    // 双击文件：预览文件
+                    this.previewFile(parseInt(id));
                 }
             });
             
@@ -285,7 +432,31 @@ class NetdiskApp {
         breadcrumb.querySelectorAll('.breadcrumb-item').forEach(item => {
             item.addEventListener('click', () => {
                 const path = item.dataset.path;
-                this.loadFileList(path);
+                if (path === '/trash') {
+                    this.showTrash();
+                } else {
+                    this.loadFileList(path);
+                }
+            });
+        });
+    }
+    
+    updateBreadcrumbForTrash() {
+        const breadcrumb = document.getElementById('breadcrumb');
+        breadcrumb.innerHTML = `
+            <span class="breadcrumb-item" data-path="/"><i class="fas fa-home"></i> 首页</span>
+            <span class="breadcrumb-item active" data-path="/trash"><i class="fas fa-trash"></i> 回收站</span>
+        `;
+        
+        // 绑定面包屑点击事件
+        breadcrumb.querySelectorAll('.breadcrumb-item').forEach(item => {
+            item.addEventListener('click', () => {
+                const path = item.dataset.path;
+                if (path === '/trash') {
+                    this.showTrash();
+                } else {
+                    this.loadFileList(path);
+                }
             });
         });
     }
@@ -557,9 +728,185 @@ class NetdiskApp {
         this.loadFileList();
     }
     
-    showTrash() {
-        // TODO: 实现回收站页面
-        this.showAlert('info', '回收站功能开发中');
+    async showTrash(updateUrl = true) {
+        try {
+            this.showLoading(true);
+            const data = await this.api('/trash/list');
+            
+            // 更新导航路径
+            this.currentPath = '/trash';
+            this.updateBreadcrumbForTrash();
+            
+            // 更新 URL（只有在需要时）
+            if (updateUrl) {
+                window.history.pushState({path: '/trash'}, '', '/trash');
+            }
+            
+            // 渲染回收站文件列表
+            this.renderTrashList(data.items);
+            
+        } catch (error) {
+            console.error('Load trash error:', error);
+            this.showAlert('error', '加载回收站失败');
+        } finally {
+            this.showLoading(false);
+        }
+    }
+    
+    renderTrashList(items) {
+        const fileList = document.getElementById('fileList');
+        const emptyState = document.getElementById('emptyState');
+        
+        if (items.length === 0) {
+            fileList.innerHTML = '';
+            emptyState.innerHTML = `
+                <i class="fas fa-trash"></i>
+                <h3>回收站为空</h3>
+                <p>删除的文件将在此处显示</p>
+            `;
+            emptyState.style.display = 'block';
+            return;
+        }
+        
+        emptyState.style.display = 'none';
+        
+        fileList.innerHTML = `
+            <div class="file-list-header">
+                <div class="file-list-actions">
+                    <button class="btn btn-primary" onclick="app.emptyTrash()">
+                        <i class="fas fa-trash"></i> 清空回收站
+                    </button>
+                    <button class="btn btn-secondary" onclick="app.autoCleanTrash()">
+                        <i class="fas fa-clock"></i> 清理过期文件
+                    </button>
+                </div>
+            </div>
+            <div class="file-grid">
+                ${items.map(item => `
+                    <div class="file-item">
+                        <div class="file-icon">${item.icon}</div>
+                        <div class="file-name">${item.name}</div>
+                        <div class="file-info">
+                            <span class="file-size">${item.formatted_size || ''}</span>
+                            <span class="file-date">删除于 ${new Date(item.deleted_at).toLocaleString()}</span>
+                            <span class="trash-days">剩余 ${item.days_remaining} 天</span>
+                        </div>
+                        <div class="file-actions">
+                            <button class="action-btn" onclick="app.restoreFile(${item.id})" title="恢复">
+                                <i class="fas fa-undo"></i>
+                            </button>
+                            <button class="action-btn danger" onclick="app.permanentDelete(${item.id})" title="永久删除">
+                                <i class="fas fa-times"></i>
+                            </button>
+                        </div>
+                    </div>
+                `).join('')}
+            </div>
+        `;
+    }
+    
+    async restoreFile(nodeId) {
+        try {
+            const response = await fetch(`/trash/restore/${nodeId}`, {
+                method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${this.accessToken}`,
+                    'Content-Type': 'application/json'
+                }
+            });
+            
+            const data = await response.json();
+            
+            if (data.success) {
+                this.showAlert('success', data.message);
+                this.showTrash(); // 刷新回收站列表
+            } else {
+                this.showAlert('error', data.message);
+            }
+        } catch (error) {
+            console.error('Restore file error:', error);
+            this.showAlert('error', '恢复文件失败');
+        }
+    }
+    
+    async permanentDelete(nodeId) {
+        if (!confirm('确定要永久删除此文件吗？此操作无法撤销！')) {
+            return;
+        }
+        
+        try {
+            const response = await fetch(`/trash/permanent/${nodeId}`, {
+                method: 'DELETE',
+                headers: {
+                    'Authorization': `Bearer ${this.accessToken}`,
+                    'Content-Type': 'application/json'
+                }
+            });
+            
+            const data = await response.json();
+            
+            if (data.success) {
+                this.showAlert('success', data.message);
+                this.showTrash(); // 刷新回收站列表
+            } else {
+                this.showAlert('error', data.message);
+            }
+        } catch (error) {
+            console.error('Permanent delete error:', error);
+            this.showAlert('error', '永久删除失败');
+        }
+    }
+    
+    async emptyTrash() {
+        if (!confirm('确定要清空回收站吗？所有文件将被永久删除，此操作无法撤销！')) {
+            return;
+        }
+        
+        try {
+            const response = await fetch('/trash/empty', {
+                method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${this.accessToken}`,
+                    'Content-Type': 'application/json'
+                }
+            });
+            
+            const data = await response.json();
+            
+            if (data.success) {
+                this.showAlert('success', data.message);
+                this.showTrash(); // 刷新回收站列表
+            } else {
+                this.showAlert('error', data.message);
+            }
+        } catch (error) {
+            console.error('Empty trash error:', error);
+            this.showAlert('error', '清空回收站失败');
+        }
+    }
+    
+    async autoCleanTrash() {
+        try {
+            const response = await fetch('/trash/auto-clean', {
+                method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${this.accessToken}`,
+                    'Content-Type': 'application/json'
+                }
+            });
+            
+            const data = await response.json();
+            
+            if (data.success) {
+                this.showAlert('success', data.message);
+                this.showTrash(); // 刷新回收站列表
+            } else {
+                this.showAlert('error', data.message);
+            }
+        } catch (error) {
+            console.error('Auto clean trash error:', error);
+            this.showAlert('error', '自动清理失败');
+        }
     }
     
     showShares() {
