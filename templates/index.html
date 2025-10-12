@@ -84,6 +84,9 @@
                         <button class="btn btn-primary" onclick="uploadFiles()">
                             <i class="fas fa-upload"></i> 上传文件
                         </button>
+                        <button class="btn btn-primary" onclick="uploadFolder()">
+                            <i class="fas fa-folder-open"></i> 上传文件夹
+                        </button>
                         <button class="btn btn-secondary" onclick="createFolder()">
                             <i class="fas fa-folder-plus"></i> 新建文件夹
                         </button>
@@ -134,6 +137,7 @@
         
         <!-- 隐藏的文件上传输入 -->
         <input type="file" id="fileInput" multiple style="display: none;">
+        <input type="file" id="folderInput" multiple webkitdirectory style="display: none;">
         
         <!-- 模态对话框 -->
         <div id="modalOverlay" class="modal-overlay" style="display: none;">

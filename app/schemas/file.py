@@ -55,6 +55,9 @@ class FileNodeResponse(BaseModel):
     deleted_at: Optional[datetime] = None
     can_preview: bool = False
     icon: str = "📄"
+    # 回收站相关字段
+    days_remaining: Optional[int] = None
+    will_delete_at: Optional[str] = None
     
     class Config:
         from_attributes = True

@@ -41,6 +41,12 @@ class NetdiskApp {
             fileInput.addEventListener('change', this.handleFileUpload.bind(this));
         }
         
+        // 文件夹上传
+        const folderInput = document.getElementById('folderInput');
+        if (folderInput) {
+            folderInput.addEventListener('change', this.handleFolderUpload.bind(this));
+        }
+        
         // 搜索
         const searchInput = document.getElementById('searchInput');
         if (searchInput) {
@@ -76,6 +82,8 @@ class NetdiskApp {
                 this.currentPath = this.getPathFromUrl();
                 if (this.currentPath === '/trash') {
                     this.showTrash(false); // 不更新 URL，因为已经在正确的 URL 上
+                } else if (this.currentPath === '/shares') {
+                    this.showShares(false); // 不更新 URL，因为已经在正确的 URL 上
                 } else {
                     this.loadFileList(this.currentPath, false); // 不更新 URL，因为已经在正确的 URL 上
                 }
@@ -128,6 +136,8 @@ class NetdiskApp {
                 this.currentPath = this.getPathFromUrl();
                 if (this.currentPath === '/trash') {
                     this.showTrash(false); // 不更新 URL，因为已经在正确的 URL 上
+                } else if (this.currentPath === '/shares') {
+                    this.showShares(false); // 不更新 URL，因为已经在正确的 URL 上
                 } else {
                     this.loadFileList(this.currentPath, false); // 不更新 URL，因为已经在正确的 URL 上
                 }
@@ -230,6 +240,9 @@ class NetdiskApp {
         if (pathname === '/trash') {
             return '/trash';
         }
+        if (pathname === '/shares') {
+            return '/shares';
+        }
         // 其他路径都是文件夹路径
         return pathname;
     }
@@ -250,6 +263,8 @@ class NetdiskApp {
                 this.currentPath = path;
                 if (path === '/trash') {
                     this.showTrash(false); // 不更新 URL，因为已经在正确的 URL 上
+                } else if (path === '/shares') {
+                    this.showShares(false); // 不更新 URL，因为已经在正确的 URL 上
                 } else {
                     this.loadFileList(path, false);
                 }
@@ -466,6 +481,10 @@ class NetdiskApp {
         document.getElementById('fileInput').click();
     }
     
+    uploadFolder() {
+        document.getElementById('folderInput').click();
+    }
+    
     async handleFileUpload(e) {
         const files = Array.from(e.target.files);
         if (files.length === 0) return;
@@ -498,6 +517,48 @@ class NetdiskApp {
         } catch (error) {
             console.error('Upload error:', error);
             this.showAlert('error', '上传失败');
+        } finally {
+            this.showUploadProgress(false);
+            e.target.value = ''; // 清空文件选择
+        }
+    }
+    
+    async handleFolderUpload(e) {
+        const files = Array.from(e.target.files);
+        if (files.length === 0) return;
+        
+        // 获取文件相对路径
+        const relativePaths = files.map(file => file.webkitRelativePath);
+        
+        const formData = new FormData();
+        files.forEach(file => {
+            formData.append('files', file);
+        });
+        formData.append('path', this.currentPath);
+        formData.append('relative_paths', JSON.stringify(relativePaths));
+        
+        try {
+            this.showUploadProgress(true);
+            
+            const response = await fetch('/files/upload', {
+                method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${this.accessToken}`,
+                },
+                body: formData
+            });
+            
+            const data = await response.json();
+            
+            if (data.success) {
+                this.showAlert('success', data.message);
+                this.loadFileList();
+            } else {
+                this.showAlert('error', data.message);
+            }
+        } catch (error) {
+            console.error('Folder upload error:', error);
+            this.showAlert('error', '文件夹上传失败');
         } finally {
             this.showUploadProgress(false);
             e.target.value = ''; // 清空文件选择
@@ -725,7 +786,13 @@ class NetdiskApp {
     }
     
     refreshFileList() {
-        this.loadFileList();
+        if (this.currentPath === '/trash') {
+            this.showTrash(false); // 不更新 URL
+        } else if (this.currentPath === '/shares') {
+            this.showShares(false); // 不更新 URL
+        } else {
+            this.loadFileList();
+        }
     }
     
     async showTrash(updateUrl = true) {
@@ -909,9 +976,143 @@ class NetdiskApp {
         }
     }
     
-    showShares() {
-        // TODO: 实现分享管理页面
-        this.showAlert('info', '分享管理功能开发中');
+    async showShares(updateUrl = true) {
+        try {
+            this.showLoading(true);
+            const data = await this.api('/share/list');
+            
+            // 更新导航路径
+            this.currentPath = '/shares';
+            this.updateBreadcrumbForShares();
+            
+            // 更新 URL（只有在需要时）
+            if (updateUrl) {
+                window.history.pushState({path: '/shares'}, '', '/shares');
+            }
+            
+            // 渲染分享列表
+            this.renderShareList(data.shares);
+            
+        } catch (error) {
+            console.error('Load shares error:', error);
+            this.showAlert('error', '加载分享列表失败');
+        } finally {
+            this.showLoading(false);
+        }
+    }
+    
+    updateBreadcrumbForShares() {
+        const breadcrumb = document.getElementById('breadcrumb');
+        breadcrumb.innerHTML = `
+            <span class="breadcrumb-item active">
+                <i class="fas fa-share-alt"></i> 我的分享
+            </span>
+        `;
+    }
+    
+    renderShareList(shares) {
+        const fileList = document.getElementById('fileList');
+        const emptyState = document.getElementById('emptyState');
+        
+        if (shares.length === 0) {
+            fileList.innerHTML = '';
+            emptyState.innerHTML = `
+                <i class="fas fa-share-alt"></i>
+                <h3>暂无分享</h3>
+                <p>您可以在文件列表中选择文件进行分享</p>
+            `;
+            emptyState.style.display = 'flex';
+            return;
+        }
+        
+        emptyState.style.display = 'none';
+        
+        let html = '';
+        shares.forEach(share => {
+            const shareInfo = share.file_info;
+            if (!shareInfo) return;
+            
+            const isExpired = share.is_expired;
+            const isActive = share.is_active && !isExpired;
+            const statusClass = isActive ? 'status-active' : (isExpired ? 'status-expired' : 'status-inactive');
+            const statusText = isActive ? '有效' : (isExpired ? '已过期' : '已停用');
+            
+            const createdTime = new Date(share.created_at).toLocaleString('zh-CN');
+            const expireTime = share.expire_at ? new Date(share.expire_at).toLocaleString('zh-CN') : '永不过期';
+            
+            html += `
+                <div class="file-item share-item" data-share-id="${share.share_id}">
+                    <div class="file-info">
+                        <div class="file-icon">${shareInfo.icon}</div>
+                        <div class="file-details">
+                            <div class="file-name">${this.escapeHtml(shareInfo.name)}</div>
+                            <div class="file-meta">
+                                <span class="share-status ${statusClass}">${statusText}</span>
+                                <span>• 下载: ${share.current_downloads}${share.max_downloads ? '/' + share.max_downloads : ''}</span>
+                                ${share.has_password ? '<span>• <i class="fas fa-lock"></i> 加密</span>' : ''}
+                            </div>
+                            <div class="file-meta">
+                                <span>创建: ${createdTime}</span>
+                                <span>• 过期: ${expireTime}</span>
+                            </div>
+                            ${share.description ? `<div class="share-description">${this.escapeHtml(share.description)}</div>` : ''}
+                        </div>
+                    </div>
+                    <div class="file-actions">
+                        <button class="btn btn-sm btn-ghost" onclick="app.copyShareLink('${share.share_id}')"
+                                title="复制链接">
+                            <i class="fas fa-copy"></i>
+                        </button>
+                        <button class="btn btn-sm btn-ghost" onclick="app.viewShareStats('${share.share_id}')"
+                                title="查看统计">
+                            <i class="fas fa-chart-bar"></i>
+                        </button>
+                        <button class="btn btn-sm btn-danger" onclick="app.deleteShare('${share.share_id}')"
+                                title="删除分享">
+                            <i class="fas fa-trash"></i>
+                        </button>
+                    </div>
+                </div>
+            `;
+        });
+        
+        fileList.innerHTML = html;
+    }
+    
+    async copyShareLink(shareId) {
+        const shareUrl = `${window.location.origin}/share/${shareId}`;
+        try {
+            await navigator.clipboard.writeText(shareUrl);
+            this.showAlert('success', '分享链接已复制到剪贴板');
+        } catch (error) {
+            console.error('Copy error:', error);
+            this.showAlert('error', '复制失败');
+        }
+    }
+    
+    async viewShareStats(shareId) {
+        // TODO: 实现分享统计查看
+        this.showAlert('info', '分享统计功能开发中');
+    }
+    
+    async deleteShare(shareId) {
+        if (!confirm('确定要删除这个分享吗？删除后将无法通过链接访问。')) return;
+        
+        try {
+            const data = await this.api(`/share/delete/${shareId}`, {
+                method: 'DELETE'
+            });
+            
+            if (data.success) {
+                this.showAlert('success', data.message);
+                this.showShares(false); // 重新加载列表
+            } else {
+                this.showAlert('error', data.message);
+            }
+        } catch (error) {
+            console.error('Delete share error:', error);
+            this.showAlert('error', '删除分享失败');
+        }
     }
     
     // 拖拽上传
@@ -1080,6 +1281,7 @@ class NetdiskApp {
 
 // 全局函数绑定
 window.uploadFiles = () => app.uploadFiles();
+window.uploadFolder = () => app.uploadFolder();
 window.createFolder = () => app.createFolder();
 window.refreshFileList = () => app.refreshFileList();
 window.showTrash = () => app.showTrash();

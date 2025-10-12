@@ -91,6 +91,12 @@ async def trash_page(request: Request):
     return templates.TemplateResponse("index.html", {"request": request})
 
 
+@app.get("/shares")
+async def shares_page(request: Request):
+    """分享管理页面"""
+    return templates.TemplateResponse("index.html", {"request": request})
+
+
 @app.get("/{path:path}")
 async def folder_path(request: Request, path: str):
     """文件夹路径页面"""

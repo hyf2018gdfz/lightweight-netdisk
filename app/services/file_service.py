@@ -236,22 +236,69 @@ class FileService:
         if not node.is_deleted:
             return False
         
-        # 删除物理文件
-        trash_path = os.path.join(TRASH_DIR, node.full_path.lstrip('/'))
-        if os.path.exists(trash_path):
-            if os.path.isfile(trash_path):
-                os.remove(trash_path)
+        try:
+            # 先删除关联的分享链接
+            from app.models.share import ShareLink
+            share_links = self.db.query(ShareLink).filter(ShareLink.file_node_id == node.id).all()
+            for share_link in share_links:
+                self.db.delete(share_link)
+            
+            # 如果是目录，也要删除子节点的分享链接
+            if node.is_directory:
+                for child in node.get_all_descendants(include_deleted=True):
+                    child_share_links = self.db.query(ShareLink).filter(ShareLink.file_node_id == child.id).all()
+                    for share_link in child_share_links:
+                        self.db.delete(share_link)
+            
+            # 尝试删除物理文件（从 trash 目录）
+            trash_path = os.path.join(TRASH_DIR, node.full_path.lstrip('/'))
+            if os.path.exists(trash_path):
+                if os.path.isfile(trash_path):
+                    os.remove(trash_path)
+                else:
+                    shutil.rmtree(trash_path)
             else:
-                shutil.rmtree(trash_path)
+                # 如果 trash 中没有，检查原始位置
+                original_path = os.path.join(STORAGE_DIR, node.full_path.lstrip('/'))
+                if os.path.exists(original_path):
+                    if os.path.isfile(original_path):
+                        os.remove(original_path)
+                    else:
+                        shutil.rmtree(original_path)
+            
+            # 删除数据库记录（级联删除子节点）
+            if node.is_directory:
+                for child in node.get_all_descendants(include_deleted=True):
+                    self.db.delete(child)
+            
+            self.db.delete(node)
+            self.db.commit()
+            return True
         
-        # 删除数据库记录（级联删除子节点）
-        if node.is_directory:
-            for child in node.get_all_descendants(include_deleted=True):
-                self.db.delete(child)
-        
-        self.db.delete(node)
-        self.db.commit()
-        return True
+        except Exception as e:
+            # 即使物理文件删除失败，也要清除数据库记录
+            print(f"Warning: Failed to delete physical file for {node.full_path}: {e}")
+            try:
+                # 先删除关联的分享链接
+                from app.models.share import ShareLink
+                share_links = self.db.query(ShareLink).filter(ShareLink.file_node_id == node.id).all()
+                for share_link in share_links:
+                    self.db.delete(share_link)
+                
+                if node.is_directory:
+                    for child in node.get_all_descendants(include_deleted=True):
+                        child_share_links = self.db.query(ShareLink).filter(ShareLink.file_node_id == child.id).all()
+                        for share_link in child_share_links:
+                            self.db.delete(share_link)
+                        self.db.delete(child)
+                
+                self.db.delete(node)
+                self.db.commit()
+                return True
+            except Exception as db_error:
+                print(f"Error: Failed to delete database record for {node.full_path}: {db_error}")
+                self.db.rollback()
+                return False
     
     def rename_node(self, node: FileNode, new_name: str) -> bool:
         """重命名文件/目录"""

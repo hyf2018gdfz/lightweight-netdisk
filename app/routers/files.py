@@ -5,6 +5,7 @@
 import os
 from typing import List
 from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form, Query
+import json
 from fastapi.responses import FileResponse, StreamingResponse
 from sqlalchemy.orm import Session
 from app.database import get_db
@@ -75,6 +76,7 @@ async def browse_directory(
 async def upload_files(
     files: List[UploadFile] = File(...),
     path: str = Form("/", description="上传目录路径"),
+    relative_paths: str = Form("", description="文件相对路径，用于文件夹上传"),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
@@ -83,7 +85,16 @@ async def upload_files(
     uploaded_files = []
     errors = []
     
-    for file in files:
+    # 解析相对路径
+    relative_path_list = []
+    if relative_paths:
+        try:
+            import json
+            relative_path_list = json.loads(relative_paths)
+        except:
+            relative_path_list = []
+    
+    for i, file in enumerate(files):
         try:
             # 检查文件大小
             content = await file.read()
@@ -91,9 +102,28 @@ async def upload_files(
                 errors.append(f"{file.filename}: 文件过大")
                 continue
             
-            # 清理文件名
-            filename = sanitize_filename(file.filename or 'unnamed')
-            file_path = os.path.join(path, filename)
+            # 处理文件路径
+            if i < len(relative_path_list) and relative_path_list[i]:
+                # 文件夹上传，使用相对路径
+                relative_path = relative_path_list[i]
+                # 清理并标准化路径
+                relative_path = os.path.normpath(relative_path)
+                # 确保目录分隔符一致
+                relative_path = relative_path.replace('\\', '/')
+                # 组合完整路径
+                if path == '/':
+                    file_path = '/' + relative_path
+                else:
+                    file_path = path + '/' + relative_path
+            else:
+                # 普通文件上传
+                filename = sanitize_filename(file.filename or 'unnamed')
+                file_path = os.path.join(path, filename)
+            
+            # 确保所有必要的目录都存在
+            dir_path = os.path.dirname(file_path)
+            if dir_path and dir_path != '/':
+                file_service.ensure_directory_exists(dir_path, current_user)
             
             # 保存文件
             file_node = file_service.save_uploaded_file(file_path, content, current_user)
