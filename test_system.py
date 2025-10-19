@@ -159,10 +159,13 @@ class NetdiskTester:
     def test_file_search(self):
         """测试文件搜索"""
         try:
-            search_data = {"keyword": "test"}
-            response = requests.post(
+            search_params = {
+                "keyword": "test",
+                "path": "/"
+            }
+            response = requests.get(
                 f"{self.base_url}/files/search",
-                json=search_data,
+                params=search_params,
                 headers=self.get_headers()
             )
             

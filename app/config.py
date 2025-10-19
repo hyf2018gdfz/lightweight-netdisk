@@ -29,7 +29,9 @@ ALLOWED_EXTENSIONS = {
 PREVIEW_EXTENSIONS = {
     'image': {'.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp'},
     'text': {'.txt', '.md', '.json', '.xml', '.html', '.css', '.js', '.py'},
-    'pdf': {'.pdf'}
+    'pdf': {'.pdf'},
+    'audio': {'.mp3', '.wav', '.flac', '.aac', '.ogg', '.m4a'},
+    'video': {'.mp4', '.avi', '.mkv', '.mov', '.wmv', '.webm', '.m4v'}
 }
 
 # 回收站配置

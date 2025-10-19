@@ -1,5 +1,6 @@
 /**
  * 个人网盘系统前端应用
+ * 版本: 2.0 - 修复搜索功能，使用GET方法和地址栏搜索
  */
 
 class NetdiskApp {
@@ -9,6 +10,7 @@ class NetdiskApp {
         this.accessToken = localStorage.getItem('access_token');
         this.userInfo = null;
         this.sortOrder = 'name-asc'; // 默认按名称升序排列
+        this.isSearchResults = false; // 标记当前是否显示搜索结果
         
         this.init();
     }
@@ -84,6 +86,16 @@ class NetdiskApp {
                     this.showTrash(false); // 不更新 URL，因为已经在正确的 URL 上
                 } else if (this.currentPath === '/shares') {
                     this.showShares(false); // 不更新 URL，因为已经在正确的 URL 上
+                } else if (this.currentPath === '/search') {
+                    // 处理搜索 URL
+                    const urlParams = new URLSearchParams(window.location.search);
+                    const keyword = urlParams.get('q');
+                    if (keyword) {
+                        document.getElementById('searchInput').value = keyword;
+                        this.searchFiles(keyword);
+                    } else {
+                        this.loadFileList('/', false);
+                    }
                 } else {
                     this.loadFileList(this.currentPath, false); // 不更新 URL，因为已经在正确的 URL 上
                 }
@@ -138,6 +150,16 @@ class NetdiskApp {
                     this.showTrash(false); // 不更新 URL，因为已经在正确的 URL 上
                 } else if (this.currentPath === '/shares') {
                     this.showShares(false); // 不更新 URL，因为已经在正确的 URL 上
+                } else if (this.currentPath === '/search') {
+                    // 处理搜索 URL
+                    const urlParams = new URLSearchParams(window.location.search);
+                    const keyword = urlParams.get('q');
+                    if (keyword) {
+                        document.getElementById('searchInput').value = keyword;
+                        this.searchFiles(keyword);
+                    } else {
+                        this.loadFileList('/', false);
+                    }
                 } else {
                     this.loadFileList(this.currentPath, false); // 不更新 URL，因为已经在正确的 URL 上
                 }
@@ -210,6 +232,7 @@ class NetdiskApp {
             const data = await this.api(`/files/browse?path=${encodeURIComponent(path)}`);
             
             this.currentPath = data.path;
+            this.isSearchResults = false; // 重置搜索状态
             this.updateBreadcrumb(data.path, data.parent_path);
             this.renderFileList(data.items);
             
@@ -243,6 +266,9 @@ class NetdiskApp {
         if (pathname === '/shares') {
             return '/shares';
         }
+        if (pathname === '/search') {
+            return '/search';
+        }
         // 其他路径都是文件夹路径
         return pathname;
     }
@@ -257,6 +283,11 @@ class NetdiskApp {
                 } else {
                     this.loadFileList(this.currentPath, false); // 不更新 URL，因为已经在正确的 URL 上
                 }
+            } else if (event.state && event.state.search) {
+                // 处理搜索状态
+                const keyword = event.state.search;
+                document.getElementById('searchInput').value = keyword;
+                this.searchFiles(keyword);
             } else {
                 // 如果没有状态，从 URL 获取路径
                 const path = this.getPathFromUrl();
@@ -265,6 +296,16 @@ class NetdiskApp {
                     this.showTrash(false); // 不更新 URL，因为已经在正确的 URL 上
                 } else if (path === '/shares') {
                     this.showShares(false); // 不更新 URL，因为已经在正确的 URL 上
+                } else if (path === '/search') {
+                    // 处理搜索 URL
+                    const urlParams = new URLSearchParams(window.location.search);
+                    const keyword = urlParams.get('q');
+                    if (keyword) {
+                        document.getElementById('searchInput').value = keyword;
+                        this.searchFiles(keyword);
+                    } else {
+                        this.loadFileList('/', false);
+                    }
                 } else {
                     this.loadFileList(path, false);
                 }
@@ -311,7 +352,9 @@ class NetdiskApp {
         fileList.style.display = 'block';
         emptyState.style.display = 'none';
         
-        fileList.innerHTML = sortedItems.map(item => this.renderFileItem(item)).join('');
+        // 检查是否有同名文件（在搜索结果中或在不同路径下）
+        const shouldShowFullPath = this.shouldShowFullPaths(sortedItems);
+        fileList.innerHTML = sortedItems.map(item => this.renderFileItem(item, shouldShowFullPath)).join('');
         
         // 绑定文件项事件
         this.bindFileItemEvents();
@@ -368,16 +411,52 @@ class NetdiskApp {
         this.loadFileList(this.currentPath, false);
     }
     
-    renderFileItem(item) {
+    shouldShowFullPaths(items) {
+        // 如果是搜索结果，总是显示完整路径
+        if (this.isSearchResults) {
+            return true;
+        }
+        
+        // 检查是否有同名文件在不同路径下
+        const nameGroups = new Map();
+        for (const item of items) {
+            if (!nameGroups.has(item.name)) {
+                nameGroups.set(item.name, []);
+            }
+            nameGroups.get(item.name).push(item);
+        }
+        
+        // 如果有任何名称出现多次且在不同路径下，则显示完整路径
+        for (const [name, group] of nameGroups) {
+            if (group.length > 1) {
+                const paths = new Set(group.map(item => item.path || item.full_path?.substring(0, item.full_path.lastIndexOf('/')) || '/'));
+                if (paths.size > 1) {
+                    return true;
+                }
+            }
+        }
+        
+        return false;
+    }
+    
+    renderFileItem(item, showFullPath = false) {
         const formattedSize = item.formatted_size || '';
         const createdAt = new Date(item.created_at).toLocaleDateString('zh-CN');
+        
+        // 如果在搜索结果中或需要显示完整路径，显示完整路径
+        const displayName = (showFullPath && item.full_path) ? item.full_path : item.name;
+        
+        // 如果显示完整路径，在元数据中添加路径信息
+        const pathInfo = showFullPath && item.path && item.path !== '/' && item.full_path !== item.name ?
+            `<div class="file-path"><i class="fas fa-folder-open"></i> ${this.escapeHtml(item.path)}</div>` : '';
         
         return `
             <div class="file-item" data-id="${item.id}" data-name="${item.name}" data-type="${item.type}">
                 <div class="file-icon">${item.icon}</div>
                 <div class="file-info">
                     <div class="file-details">
-                        <h4>${this.escapeHtml(item.name)}</h4>
+                        <h4>${this.escapeHtml(displayName)}</h4>
+                        ${pathInfo}
                         <div class="file-meta">
                             ${item.type === 'file' ? formattedSize + ' • ' : ''}${createdAt}
                         </div>
@@ -661,11 +740,47 @@ class NetdiskApp {
                     // 图片预览
                     const blob = await response.blob();
                     const imageUrl = URL.createObjectURL(blob);
-                    this.showModal('文件预览', `<img src="${imageUrl}" class="preview-image" alt="预览图片">`);
+                    this.showModal('图片预览', `<img src="${imageUrl}" class="preview-image" alt="预览图片">`);
+                } else if (contentType && contentType.startsWith('audio/')) {
+                    // 音频预览
+                    const blob = await response.blob();
+                    const audioUrl = URL.createObjectURL(blob);
+                    this.showModal('音频预览', `
+                        <div class="media-preview">
+                            <audio controls style="width: 100%; max-width: 500px;">
+                                <source src="${audioUrl}" type="${contentType}">
+                                您的浏览器不支持音频播放。
+                            </audio>
+                        </div>
+                    `);
+                } else if (contentType && contentType.startsWith('video/')) {
+                    // 视频预览
+                    const blob = await response.blob();
+                    const videoUrl = URL.createObjectURL(blob);
+                    this.showModal('视频预览', `
+                        <div class="media-preview">
+                            <video controls style="width: 100%; max-width: 100%; max-height: 70vh;">
+                                <source src="${videoUrl}" type="${contentType}">
+                                您的浏览器不支持视频播放。
+                            </video>
+                        </div>
+                    `);
+                } else if (contentType && contentType === 'application/pdf') {
+                    // PDF预览
+                    const blob = await response.blob();
+                    const pdfUrl = URL.createObjectURL(blob);
+                    this.showModal('PDF预览', `
+                        <div class="pdf-preview">
+                            <iframe src="${pdfUrl}" style="width: 100%; height: 70vh; border: none;"></iframe>
+                        </div>
+                    `, `
+                        <button type="button" class="btn btn-secondary" onclick="window.open('${pdfUrl}', '_blank')">在新窗口打开</button>
+                        <button type="button" class="btn btn-primary" onclick="app.closeModal()">关闭</button>
+                    `);
                 } else {
                     // 文本预览
                     const data = await response.json();
-                    this.showModal('文件预览', `<div class="preview-container"><pre class="preview-text">${this.escapeHtml(data.content)}</pre></div>`);
+                    this.showModal('文本预览', `<div class="preview-container"><pre class="preview-text">${this.escapeHtml(data.content)}</pre></div>`);
                 }
             } else {
                 this.showAlert('error', '预览失败');
@@ -755,24 +870,32 @@ class NetdiskApp {
         }
     }
     
-    async searchFiles() {
-        const keyword = document.getElementById('searchInput').value.trim();
+    async searchFiles(keyword = null) {
+        if (keyword === null) {
+            keyword = document.getElementById('searchInput').value.trim();
+        }
+        
         if (!keyword) {
+            this.isSearchResults = false;
             this.loadFileList();
             return;
         }
         
         try {
             this.showLoading(true);
-            const data = await this.api('/files/search', {
-                method: 'POST',
-                body: JSON.stringify({
-                    keyword: keyword,
-                    path: this.currentPath
-                })
+            const searchParams = new URLSearchParams({
+                keyword: keyword,
+                path: this.currentPath
             });
             
+            const data = await this.api(`/files/search?${searchParams.toString()}`);
+            
+            this.isSearchResults = true;
             this.renderFileList(data.results);
+            
+            // 更新地址栏显示搜索参数
+            const searchUrl = `/search?q=${encodeURIComponent(keyword)}`;
+            window.history.pushState({search: keyword}, '', searchUrl);
             
             // 更新面包屑显示搜索结果
             const breadcrumb = document.getElementById('breadcrumb');

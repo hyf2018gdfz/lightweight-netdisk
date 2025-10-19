@@ -32,9 +32,23 @@ def is_pdf(node: FileNode) -> bool:
     return node.file_extension in PREVIEW_EXTENSIONS.get('pdf', set())
 
 
+def is_audio(node: FileNode) -> bool:
+    """判断是否为音频文件"""
+    if not node.is_file:
+        return False
+    return node.file_extension in PREVIEW_EXTENSIONS.get('audio', set())
+
+
+def is_video(node: FileNode) -> bool:
+    """判断是否为视频文件"""
+    if not node.is_file:
+        return False
+    return node.file_extension in PREVIEW_EXTENSIONS.get('video', set())
+
+
 def can_preview(node: FileNode) -> bool:
     """判断文件是否可以预览"""
-    return is_image(node) or is_text(node) or is_pdf(node)
+    return is_image(node) or is_text(node) or is_pdf(node) or is_audio(node) or is_video(node)
 
 
 def get_file_content(node: FileNode) -> bytes:

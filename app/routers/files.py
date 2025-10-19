@@ -4,7 +4,7 @@
 
 import os
 from typing import List
-from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form, Query
+from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form, Query, Request
 import json
 from fastapi.responses import FileResponse, StreamingResponse
 from sqlalchemy.orm import Session
@@ -15,7 +15,8 @@ from app.services.file_service import FileService
 from app.utils.auth import get_current_user
 from app.utils.file_utils import (
     get_file_content, get_text_content, create_zip_from_nodes,
-    format_file_size, get_file_icon, can_preview, sanitize_filename
+    format_file_size, get_file_icon, can_preview, sanitize_filename,
+    is_audio, is_video
 )
 from app.schemas.file import (
     FileUploadResponse, DirectoryCreateRequest, FileNodeResponse,
@@ -176,10 +177,11 @@ async def create_directory(
 @router.get("/download/{node_id}")
 async def download_file(
     node_id: int,
+    request: Request,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    """下载文件"""
+    """下载文件（支持断点续传）"""
     file_service = FileService(db)
     node = file_service.get_node_by_id(node_id, current_user)
     
@@ -187,16 +189,62 @@ async def download_file(
         raise HTTPException(status_code=404, detail="文件不存在")
     
     if node.is_file:
-        # 下载单个文件
+        # 下载单个文件（支持Range请求）
         file_path = node.physical_path
         if not os.path.exists(file_path):
             raise HTTPException(status_code=404, detail="文件不存在")
         
-        return FileResponse(
-            file_path,
-            filename=node.name,
-            media_type='application/octet-stream'
-        )
+        file_size = os.path.getsize(file_path)
+        range_header = request.headers.get('Range')
+        
+        if range_header:
+            # 处理Range请求
+            try:
+                ranges = range_header.replace('bytes=', '').split('-')
+                start = int(ranges[0]) if ranges[0] else 0
+                end = int(ranges[1]) if ranges[1] else file_size - 1
+                
+                # 验证范围
+                if start >= file_size or end >= file_size or start > end:
+                    raise HTTPException(status_code=416, detail="Range Not Satisfiable")
+                
+                content_length = end - start + 1
+                
+                def iterfile(start: int, end: int):
+                    with open(file_path, 'rb') as file:
+                        file.seek(start)
+                        remaining = end - start + 1
+                        while remaining > 0:
+                            chunk_size = min(8192, remaining)
+                            chunk = file.read(chunk_size)
+                            if not chunk:
+                                break
+                            remaining -= len(chunk)
+                            yield chunk
+                
+                headers = {
+                    'Content-Range': f'bytes {start}-{end}/{file_size}',
+                    'Accept-Ranges': 'bytes',
+                    'Content-Length': str(content_length),
+                    'Content-Disposition': f'attachment; filename="{node.name}"'
+                }
+                
+                return StreamingResponse(
+                    iterfile(start, end),
+                    status_code=206,
+                    headers=headers,
+                    media_type='application/octet-stream'
+                )
+            except (ValueError, IndexError):
+                raise HTTPException(status_code=400, detail="Invalid Range header")
+        else:
+            # 普通下载
+            return FileResponse(
+                file_path,
+                filename=node.name,
+                media_type='application/octet-stream',
+                headers={'Accept-Ranges': 'bytes'}
+            )
     
     elif node.is_directory:
         # 打包目录为ZIP下载
@@ -312,6 +360,39 @@ async def preview_file(
                 media_type='application/pdf',
                 filename=node.name
             )
+        elif is_audio(node):
+            # 音频文件直接返回
+            audio_mime_types = {
+                '.mp3': 'audio/mpeg',
+                '.wav': 'audio/wav',
+                '.flac': 'audio/flac',
+                '.aac': 'audio/aac',
+                '.ogg': 'audio/ogg',
+                '.m4a': 'audio/mp4'
+            }
+            mime_type = audio_mime_types.get(node.file_extension, 'audio/mpeg')
+            return FileResponse(
+                node.physical_path,
+                media_type=mime_type,
+                filename=node.name
+            )
+        elif is_video(node):
+            # 视频文件直接返回
+            video_mime_types = {
+                '.mp4': 'video/mp4',
+                '.avi': 'video/x-msvideo',
+                '.mkv': 'video/x-matroska',
+                '.mov': 'video/quicktime',
+                '.wmv': 'video/x-ms-wmv',
+                '.webm': 'video/webm',
+                '.m4v': 'video/mp4'
+            }
+            mime_type = video_mime_types.get(node.file_extension, 'video/mp4')
+            return FileResponse(
+                node.physical_path,
+                media_type=mime_type,
+                filename=node.name
+            )
         else:
             raise HTTPException(status_code=400, detail="不支持的预览类型")
     
@@ -319,9 +400,10 @@ async def preview_file(
         raise HTTPException(status_code=500, detail=f"预览失败: {str(e)}")
 
 
-@router.post("/search", response_model=SearchResponse)
+@router.get("/search", response_model=SearchResponse)
 async def search_files(
-    request: SearchRequest,
+    keyword: str = Query(..., description="搜索关键词"),
+    path: str = Query("/", description="搜索路径"),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
@@ -330,12 +412,12 @@ async def search_files(
     query = db.query(FileNode).filter(
         FileNode.owner_id == current_user.id,
         FileNode.is_deleted == False,
-        FileNode.name.contains(request.keyword)
+        FileNode.name.contains(keyword)
     )
     
     # 如果指定了路径，只在该路径下搜索
-    if request.path != '/':
-        query = query.filter(FileNode.full_path.startswith(request.path))
+    if path != '/':
+        query = query.filter(FileNode.full_path.startswith(path))
     
     results = query.limit(100).all()
     
@@ -349,7 +431,7 @@ async def search_files(
         items.append(FileNodeResponse(**item_data))
     
     return SearchResponse(
-        keyword=request.keyword,
+        keyword=keyword,
         results=items,
         total=len(items)
     )

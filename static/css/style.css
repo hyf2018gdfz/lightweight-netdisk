@@ -826,3 +826,59 @@ body {
     color: #666;
     font-style: italic;
 }
+
+/* 媒体预览样式 */
+.media-preview {
+    text-align: center;
+    padding: 1rem;
+}
+
+.media-preview audio,
+.media-preview video {
+    border-radius: 8px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+}
+
+.pdf-preview {
+    text-align: center;
+}
+
+.pdf-preview iframe {
+    border-radius: 8px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+}
+
+.preview-image {
+    max-width: 100%;
+    max-height: 70vh;
+    border-radius: 8px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+}
+
+.preview-container {
+    max-height: 70vh;
+    overflow-y: auto;
+}
+
+.preview-text {
+    background-color: #f8f9fa;
+    padding: 1rem;
+    border-radius: 8px;
+    font-size: 0.9rem;
+    line-height: 1.5;
+    white-space: pre-wrap;
+    word-wrap: break-word;
+}
+
+/* 文件路径显示样式 */
+.file-path {
+    color: #6c757d;
+    font-size: 0.85rem;
+    margin-top: 0.25rem;
+    margin-bottom: 0.25rem;
+}
+
+.file-path i {
+    margin-right: 0.25rem;
+    color: #ffc107;
+}
