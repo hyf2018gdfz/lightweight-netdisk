@@ -42,11 +42,14 @@
 - **主题优化**：清爽的视觉设计，使用 Font Awesome 图标
 
 ### 🔒 安全特性
+- **JWT 认证**：安全的无状态认证机制，支持 Bearer Token
+- **密码安全**：bcrypt 加密存储，可配置的管理员账户
 - **安全头部**：XSS、CSRF、点击劫持等攻击防护
 - **输入验证**：严格的数据验证和路径安全检查
 - **CORS 配置**：可配置的跨域请求控制
 - **可信主机**：可配置的可信主机列表
 - **文件类型检测**：使用 python-magic 进行文件类型检测
+- **环境变量配置**：敏感信息通过环境变量管理
 
 ## 🚀 快速开始
 
@@ -72,7 +75,8 @@ python main.py
 
 3. **开始使用**
    - 访问：http://localhost:8000
-   - 默认账户：`admin` / `admin123`
+   - 首次使用：运行 `python setup_admin.py` 设置管理员密码
+   - 或通过环境变量配置：`DEFAULT_ADMIN_USERNAME` 和 `DEFAULT_ADMIN_PASSWORD`
 
 ## 🛠️ 技术栈
 
@@ -176,6 +180,10 @@ CLEANUP_INTERVAL_HOURS=24      # 清理检查间隔（小时）
 
 # 日志配置
 LOG_LEVEL=INFO                 # 日志级别
+
+# 默认管理员配置（仅首次初始化时使用）
+DEFAULT_ADMIN_USERNAME=admin   # 管理员用户名
+DEFAULT_ADMIN_PASSWORD=your-secure-password  # 管理员密码
 ```
 
 ### 数据库配置示例
@@ -318,7 +326,13 @@ venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
-4. **启动开发服务器**
+4. **设置管理员账户**
+```bash
+# 首次运行设置管理员密码
+python setup_admin.py
+```
+
+5. **启动开发服务器**
 ```bash
 python main.py
 ```

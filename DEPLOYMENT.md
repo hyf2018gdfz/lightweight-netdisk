@@ -93,12 +93,23 @@ python main.py
 uvicorn main:app --host 0.0.0.0 --port 8000
 ```
 
-### 5. 访问系统
+### 5. 设置管理员账户
+
+**方式一：使用设置脚本（推荐）**
+```bash
+python setup_admin.py
+```
+
+**方式二：环境变量配置**
+```bash
+export DEFAULT_ADMIN_USERNAME=admin
+export DEFAULT_ADMIN_PASSWORD=your-secure-password
+```
+
+### 6. 访问系统
 
 - 打开浏览器访问：`http://localhost:8000`
-- 默认管理员账户：
-  - **用户名**: `admin`
-  - **密码**: `admin123`
+- 使用设置的管理员账户登录
 
 ## 🐳 Docker 部署
 
@@ -124,6 +135,8 @@ services:
       - MAX_FILE_SIZE=104857600
       - CORS_ORIGINS=*
       - TRUSTED_HOSTS=*
+      - DEFAULT_ADMIN_USERNAME=admin
+      - DEFAULT_ADMIN_PASSWORD=your-secure-admin-password
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
@@ -203,6 +216,8 @@ docker run -d \
   -v $(pwd)/trash:/app/trash \
   -v $(pwd)/database.db:/app/database.db \
   -e SECRET_KEY=your-super-secret-key \
+  -e DEFAULT_ADMIN_USERNAME=admin \
+  -e DEFAULT_ADMIN_PASSWORD=your-secure-admin-password \
   --restart unless-stopped \
   personal-netdisk
 ```

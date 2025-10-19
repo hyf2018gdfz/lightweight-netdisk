@@ -69,6 +69,10 @@ class Settings:
     PREVIEW_TEXT_MAX_SIZE: int = 1024 * 1024  # 1MB
     PREVIEW_IMAGE_MAX_SIZE: int = 10 * 1024 * 1024  # 10MB
     
+    # 默认管理员配置
+    DEFAULT_ADMIN_USERNAME: str = os.getenv("DEFAULT_ADMIN_USERNAME", "admin")
+    DEFAULT_ADMIN_PASSWORD: str = os.getenv("DEFAULT_ADMIN_PASSWORD", "admin123")  # 仅首次使用
+    
     @classmethod
     def validate_config(cls) -> List[str]:
         """验证配置的有效性"""
@@ -85,6 +89,10 @@ class Settings:
         # 检查密钥安全性
         if cls.SECRET_KEY == "your-super-secret-key-here-change-in-production":
             errors.append("请在生产环境中更改SECRET_KEY")
+        
+        # 检查默认密码安全性
+        if not cls.DEBUG and cls.DEFAULT_ADMIN_PASSWORD == "admin123":
+            errors.append("请在生产环境中更改默认管理员密码（设置DEFAULT_ADMIN_PASSWORD环境变量）")
         
         # 检查文件大小限制
         if cls.MAX_FILE_SIZE <= 0:
@@ -145,4 +153,8 @@ CLEANUP_INTERVAL_HOURS=24
 
 # 日志配置
 LOG_LEVEL=INFO
+
+# 默认管理员配置（仅首次初始化时使用）
+DEFAULT_ADMIN_USERNAME=admin
+DEFAULT_ADMIN_PASSWORD=your-secure-admin-password-here
 """

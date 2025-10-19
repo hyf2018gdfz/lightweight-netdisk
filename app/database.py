@@ -6,7 +6,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, Session
 from contextlib import contextmanager
-from app.config import DATABASE_URL
+from app.config import DATABASE_URL, settings
 from app.models.user import User
 from app.models.file import FileNode
 from app.models.share import ShareLink
@@ -74,15 +74,17 @@ async def create_default_user():
     """创建默认用户"""
     with get_db_context() as db:
         # 检查是否已存在用户
-        existing_user = db.query(User).filter(User.username == "admin").first()
+        admin_username = settings.DEFAULT_ADMIN_USERNAME
+        existing_user = db.query(User).filter(User.username == admin_username).first()
         if existing_user:
             print("默认用户已存在")
             return
         
         # 创建默认管理员用户
+        admin_password = settings.DEFAULT_ADMIN_PASSWORD
         default_user = User(
-            username="admin",
-            hashed_password=User.hash_password("admin123"),
+            username=admin_username,
+            hashed_password=User.hash_password(admin_password),
             is_active=True
         )
         
@@ -92,4 +94,7 @@ async def create_default_user():
         
         # 根目录不需要在数据库中创建节点，它是虚拟的
         
-        print("✅ 默认用户创建完成 (用户名: admin, 密码: admin123)")
+        if settings.DEBUG:
+            print(f"✅ 默认用户创建完成 (用户名: {admin_username})")  # 不再显示密码
+        else:
+            print("✅ 默认管理员用户创建完成，请使用设置的凭据登录")

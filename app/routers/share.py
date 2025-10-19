@@ -5,6 +5,7 @@
 import os
 from typing import List, Optional
 from datetime import datetime, timedelta
+from urllib.parse import quote
 from fastapi import APIRouter, Depends, HTTPException, status, Request, Query
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
@@ -27,6 +28,22 @@ import io
 
 router = APIRouter()
 templates = Jinja2Templates(directory="templates")
+
+
+def encode_filename_for_content_disposition(filename: str) -> str:
+    """
+    Encode filename for Content-Disposition header to support special characters
+    Uses RFC 5987 / RFC 2231 encoding
+    """
+    try:
+        # Try ASCII first
+        filename.encode('ascii')
+        # If it's pure ASCII, use simple format
+        return f'attachment; filename="{filename}"'
+    except UnicodeEncodeError:
+        # Use RFC 5987 format for non-ASCII characters
+        encoded_filename = quote(filename.encode('utf-8'))
+        return f"attachment; filename*=UTF-8''{encoded_filename}"
 
 
 @router.post("/create", response_model=ShareResponse)
@@ -232,10 +249,13 @@ async def download_shared_file(
         if not os.path.exists(file_path):
             raise HTTPException(status_code=404, detail="文件不存在")
         
+        headers = {
+            'Content-Disposition': encode_filename_for_content_disposition(node.name)
+        }
         return FileResponse(
             file_path,
-            filename=node.name,
-            media_type='application/octet-stream'
+            media_type='application/octet-stream',
+            headers=headers
         )
     
     elif node.is_directory:
@@ -248,7 +268,7 @@ async def download_shared_file(
         return StreamingResponse(
             io.BytesIO(zip_content),
             media_type='application/zip',
-            headers={"Content-Disposition": f"attachment; filename={zip_filename}"}
+            headers={"Content-Disposition": encode_filename_for_content_disposition(zip_filename)}
         )
 
 

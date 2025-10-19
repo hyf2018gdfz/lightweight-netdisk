@@ -671,15 +671,55 @@ class NetdiskApp {
     async downloadFile(fileId) {
         try {
             const url = `/files/download/${fileId}`;
+            
+            // 使用 fetch 进行下载，支持 Authorization 头部
+            const response = await fetch(url, {
+                headers: {
+                    'Authorization': `Bearer ${this.accessToken}`
+                }
+            });
+            
+            if (!response.ok) {
+                throw new Error(`HTTP error! status: ${response.status}`);
+            }
+            
+            // 获取文件名
+            const contentDisposition = response.headers.get('Content-Disposition');
+            let filename = 'download';
+            if (contentDisposition) {
+                // 首先尝试 RFC 5987 格式 (filename*=UTF-8''encoded_name)
+                const rfc5987Match = contentDisposition.match(/filename\*=UTF-8''([^;]+)/);
+                if (rfc5987Match && rfc5987Match[1]) {
+                    try {
+                        filename = decodeURIComponent(rfc5987Match[1]);
+                    } catch (e) {
+                        console.warn('Failed to decode RFC 5987 filename:', e);
+                    }
+                } else {
+                    // 备用方案：传统格式 (filename="name")
+                    const matches = contentDisposition.match(/filename="?([^"]+)"?/);
+                    if (matches && matches[1]) {
+                        filename = matches[1];
+                    }
+                }
+            }
+            
+            // 创建下载链接
+            const blob = await response.blob();
+            const downloadUrl = URL.createObjectURL(blob);
             const link = document.createElement('a');
-            link.href = `${url}?token=${this.accessToken}`;
-            link.download = '';
+            link.href = downloadUrl;
+            link.download = filename;
             document.body.appendChild(link);
             link.click();
             document.body.removeChild(link);
+            
+            // 清理 blob URL
+            URL.revokeObjectURL(downloadUrl);
+            
         } catch (error) {
             console.error('Download error:', error);
-            this.showAlert('error', '下载失败');
+            this.showAlert('error', '下载失败：' + error.message);
         }
     }
     
@@ -745,25 +785,39 @@ class NetdiskApp {
                     // 音频预览
                     const blob = await response.blob();
                     const audioUrl = URL.createObjectURL(blob);
+                    
+                    console.log('Audio preview:', { contentType, blobSize: blob.size, audioUrl });
+                    
                     this.showModal('音频预览', `
                         <div class="media-preview">
-                            <audio controls style="width: 100%; max-width: 500px;">
+                            <audio controls style="width: 100%; max-width: 500px;" preload="metadata">
                                 <source src="${audioUrl}" type="${contentType}">
                                 您的浏览器不支持音频播放。
                             </audio>
+                            <p><small>MIME 类型: ${contentType} | 文件大小: ${this.formatBytes(blob.size)}</small></p>
                         </div>
+                    `, `
+                        <button type="button" class="btn btn-secondary" onclick="window.open('${audioUrl}', '_blank')">在新窗口播放</button>
+                        <button type="button" class="btn btn-primary" onclick="app.closeModal(); URL.revokeObjectURL('${audioUrl}')">关闭</button>
                     `);
                 } else if (contentType && contentType.startsWith('video/')) {
                     // 视频预览
                     const blob = await response.blob();
                     const videoUrl = URL.createObjectURL(blob);
+                    
+                    console.log('Video preview:', { contentType, blobSize: blob.size, videoUrl });
+                    
                     this.showModal('视频预览', `
                         <div class="media-preview">
-                            <video controls style="width: 100%; max-width: 100%; max-height: 70vh;">
+                            <video controls style="width: 100%; max-width: 100%; max-height: 70vh;" preload="metadata">
                                 <source src="${videoUrl}" type="${contentType}">
                                 您的浏览器不支持视频播放。
                             </video>
+                            <p><small>MIME 类型: ${contentType} | 文件大小: ${this.formatBytes(blob.size)}</small></p>
                         </div>
+                    `, `
+                        <button type="button" class="btn btn-secondary" onclick="window.open('${videoUrl}', '_blank')">在新窗口播放</button>
+                        <button type="button" class="btn btn-primary" onclick="app.closeModal(); URL.revokeObjectURL('${videoUrl}')">关闭</button>
                     `);
                 } else if (contentType && contentType === 'application/pdf') {
                     // PDF预览
@@ -1399,6 +1453,15 @@ class NetdiskApp {
         const div = document.createElement('div');
         div.textContent = text;
         return div.innerHTML;
+    }
+    
+    formatBytes(bytes, decimals = 2) {
+        if (bytes === 0) return '0 Bytes';
+        const k = 1024;
+        const dm = decimals < 0 ? 0 : decimals;
+        const sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB', 'PB', 'EB', 'ZB', 'YB'];
+        const i = Math.floor(Math.log(bytes) / Math.log(k));
+        return parseFloat((bytes / Math.pow(k, i)).toFixed(dm)) + ' ' + sizes[i];
     }
 }
 
