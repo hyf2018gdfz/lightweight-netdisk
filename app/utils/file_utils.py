@@ -92,21 +92,55 @@ def create_zip_from_nodes(nodes: List[FileNode], base_path: str = "") -> bytes:
     # 创建临时文件
     with tempfile.NamedTemporaryFile() as temp_file:
         with zipfile.ZipFile(temp_file.name, 'w', zipfile.ZIP_DEFLATED) as zipf:
+            # 确定根节点：如果是单个目录，则使用该目录作为根节点
+            root_node = None
+            if len(nodes) == 1 and nodes[0].is_directory:
+                root_node = nodes[0]
+            
             for node in nodes:
-                _add_node_to_zip(zipf, node, base_path)
+                _add_node_to_zip(zipf, node, base_path, root_node)
         
         # 读取ZIP文件内容
         temp_file.seek(0)
         return temp_file.read()
 
 
-def _add_node_to_zip(zipf: zipfile.ZipFile, node: FileNode, base_path: str = ""):
+def _add_node_to_zip(zipf: zipfile.ZipFile, node: FileNode, base_path: str = "", root_node: FileNode = None):
     """递归添加节点到ZIP文件"""
     if node.is_deleted:
         return
     
-    # 计算在ZIP中的路径
-    zip_path = os.path.join(base_path, node.name) if base_path else node.name
+    # 计算在ZIP中的路径，使用正斜杠作为分隔符
+    if root_node and node != root_node:
+        # 如果有根节点且不是根节点本身，计算相对路径
+        root_path = root_node.full_path.rstrip('/')
+        node_path = node.full_path
+        if node_path.startswith(root_path + '/'):
+            relative_path = node_path[len(root_path) + 1:]
+            zip_path = relative_path
+        else:
+            zip_path = node.name
+    elif root_node and node == root_node:
+        # 如果当前节点就是根节点，由于我们要保持内部结构，直接递归处理子节点
+        if node.is_directory:
+            children = node.get_children()
+            if not children:
+                # 空目录，不需要创建目录项
+                pass
+            else:
+                # 递归添加子节点
+                for child in children:
+                    _add_node_to_zip(zipf, child, base_path, root_node)
+        return
+    else:
+        # 使用基本路径拼接
+        if base_path:
+            zip_path = f"{base_path}/{node.name}"
+        else:
+            zip_path = node.name
+    
+    # 确保使用正斜杠作为分隔符
+    zip_path = zip_path.replace('\\', '/')
     
     if node.is_file:
         # 添加文件
@@ -118,12 +152,12 @@ def _add_node_to_zip(zipf: zipfile.ZipFile, node: FileNode, base_path: str = "")
         # 添加目录（如果为空目录，创建一个空目录项）
         children = node.get_children()
         if not children:
-            # 空目录
+            # 空目录，添加一个以/结尾的路径
             zipf.writestr(zip_path + '/', '')
         else:
             # 递归添加子节点
             for child in children:
-                _add_node_to_zip(zipf, child, zip_path)
+                _add_node_to_zip(zipf, child, zip_path, root_node)
 
 
 def format_file_size(size_bytes: int) -> str:

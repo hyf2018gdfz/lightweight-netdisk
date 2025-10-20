@@ -141,3 +141,97 @@ class SearchResponse(BaseModel):
     keyword: str
     results: List[FileNodeResponse]
     total: int
+
+
+class BatchDownloadRequest(BaseModel):
+    """批量下载请求"""
+    file_ids: List[int]
+    
+    @validator('file_ids')
+    def validate_file_ids(cls, v):
+        if not v or len(v) == 0:
+            raise ValueError('文件ID列表不能为空')
+        if len(v) > 100:  # 限制最多100个文件
+            raise ValueError('一次最多可下载100个文件')
+        return v
+
+
+class ChunkUploadInitRequest(BaseModel):
+    """分片上传初始化请求"""
+    filename: str
+    file_size: int
+    chunk_size: int
+    path: str = "/"
+    file_hash: Optional[str] = None  # 文件MD5哈希，用于校验
+    
+    @validator('filename')
+    def validate_filename(cls, v):
+        if not v or not v.strip():
+            raise ValueError('文件名不能为空')
+        
+        # 检查非法字符
+        illegal_chars = '<>:"/\\|?*'
+        for char in illegal_chars:
+            if char in v:
+                raise ValueError(f'文件名不能包含字符: {char}')
+        
+        return v.strip()
+    
+    @validator('file_size')
+    def validate_file_size(cls, v):
+        if v <= 0:
+            raise ValueError('文件大小必须大于0')
+        if v > 10 * 1024 * 1024 * 1024:  # 限制10GB
+            raise ValueError('文件大小超过限制（10GB）')
+        return v
+    
+    @validator('chunk_size')
+    def validate_chunk_size(cls, v):
+        if v <= 0:
+            raise ValueError('分片大小必须大于0')
+        if v > 50 * 1024 * 1024:  # 限制50MB per chunk
+            raise ValueError('分片大小超过限制（50MB）')
+        return v
+
+
+class ChunkUploadInitResponse(BaseModel):
+    """分片上传初始化响应"""
+    success: bool
+    message: str
+    upload_id: Optional[str] = None
+    total_chunks: Optional[int] = None
+    uploaded_chunks: Optional[List[int]] = None  # 已上传的分片索引
+
+
+class ChunkUploadRequest(BaseModel):
+    """分片上传请求"""
+    upload_id: str
+    chunk_index: int
+    chunk_hash: Optional[str] = None  # 分片MD5哈希
+    
+    @validator('chunk_index')
+    def validate_chunk_index(cls, v):
+        if v < 0:
+            raise ValueError('分片索引不能为负数')
+        return v
+
+
+class ChunkUploadResponse(BaseModel):
+    """分片上传响应"""
+    success: bool
+    message: str
+    chunk_index: int
+    received: bool = False
+
+
+class ChunkUploadCompleteRequest(BaseModel):
+    """分片上传完成请求"""
+    upload_id: str
+    file_hash: Optional[str] = None  # 用于最终校验
+
+
+class ChunkUploadCompleteResponse(BaseModel):
+    """分片上传完成响应"""
+    success: bool
+    message: str
+    file_info: Optional[dict] = None

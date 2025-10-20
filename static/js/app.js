@@ -503,6 +503,9 @@ class NetdiskApp {
                     });
                     item.classList.add('selected');
                 }
+                
+                // 更新批量操作按钮显示状态
+                this.updateBatchActionsVisibility();
             });
         });
     }
@@ -568,31 +571,47 @@ class NetdiskApp {
         const files = Array.from(e.target.files);
         if (files.length === 0) return;
         
-        const formData = new FormData();
-        files.forEach(file => {
-            formData.append('files', file);
-        });
-        formData.append('path', this.currentPath);
-        
         try {
-            this.showUploadProgress(true);
+            this.showUploadProgress(true, `正在上传 ${files.length} 个文件...`);
             
-            const response = await fetch('/files/upload', {
-                method: 'POST',
-                headers: {
-                    'Authorization': `Bearer ${this.accessToken}`,
-                },
-                body: formData
-            });
+            // 检查是否有大文件需要分片上传
+            const CHUNK_SIZE_THRESHOLD = 50 * 1024 * 1024; // 50MB
+            let successCount = 0;
+            let errorCount = 0;
             
-            const data = await response.json();
-            
-            if (data.success) {
-                this.showAlert('success', data.message);
-                this.loadFileList();
-            } else {
-                this.showAlert('error', data.message);
+            for (let i = 0; i < files.length; i++) {
+                const file = files[i];
+                try {
+                    if (file.size > CHUNK_SIZE_THRESHOLD) {
+                        // 大文件，使用分片上传
+                        this.updateProgress((i / files.length) * 100);
+                        await this.uploadLargeFile(file);
+                    } else {
+                        // 小文件，使用常规上传
+                        await this.uploadSmallFile(file);
+                    }
+                    successCount++;
+                } catch (error) {
+                    console.error(`Upload error for file ${file.name}:`, error);
+                    errorCount++;
+                }
+                
+                // 更新总进度
+                this.updateProgress(((i + 1) / files.length) * 100);
             }
+            
+            // 显示结果
+            if (successCount > 0) {
+                let message = `成功上传 ${successCount} 个文件`;
+                if (errorCount > 0) {
+                    message += `，${errorCount} 个文件失败`;
+                }
+                this.showAlert('success', message);
+                this.loadFileList();
+            } else if (errorCount > 0) {
+                this.showAlert('error', `上传失败：${errorCount} 个文件上传失败`);
+            }
+            
         } catch (error) {
             console.error('Upload error:', error);
             this.showAlert('error', '上传失败');
@@ -606,35 +625,49 @@ class NetdiskApp {
         const files = Array.from(e.target.files);
         if (files.length === 0) return;
         
-        // 获取文件相对路径
-        const relativePaths = files.map(file => file.webkitRelativePath);
-        
-        const formData = new FormData();
-        files.forEach(file => {
-            formData.append('files', file);
-        });
-        formData.append('path', this.currentPath);
-        formData.append('relative_paths', JSON.stringify(relativePaths));
-        
         try {
-            this.showUploadProgress(true);
+            this.showUploadProgress(true, `正在上传文件夹 (${files.length} 个文件)...`);
             
-            const response = await fetch('/files/upload', {
-                method: 'POST',
-                headers: {
-                    'Authorization': `Bearer ${this.accessToken}`,
-                },
-                body: formData
-            });
+            // 检查是否有大文件需要分片上传
+            const CHUNK_SIZE_THRESHOLD = 50 * 1024 * 1024; // 50MB
+            let successCount = 0;
+            let errorCount = 0;
             
-            const data = await response.json();
-            
-            if (data.success) {
-                this.showAlert('success', data.message);
-                this.loadFileList();
-            } else {
-                this.showAlert('error', data.message);
+            for (let i = 0; i < files.length; i++) {
+                const file = files[i];
+                const relativePath = file.webkitRelativePath;
+                
+                try {
+                    if (file.size > CHUNK_SIZE_THRESHOLD) {
+                        // 大文件，使用分片上传
+                        this.updateProgress((i / files.length) * 100);
+                        await this.uploadLargeFile(file, relativePath);
+                    } else {
+                        // 小文件，使用常规上传
+                        await this.uploadSmallFileWithPath(file, relativePath);
+                    }
+                    successCount++;
+                } catch (error) {
+                    console.error(`Upload error for file ${file.name}:`, error);
+                    errorCount++;
+                }
+                
+                // 更新总进度
+                this.updateProgress(((i + 1) / files.length) * 100);
             }
+            
+            // 显示结果
+            if (successCount > 0) {
+                let message = `成功上传 ${successCount} 个文件`;
+                if (errorCount > 0) {
+                    message += `，${errorCount} 个文件失败`;
+                }
+                this.showAlert('success', message);
+                this.loadFileList();
+            } else if (errorCount > 0) {
+                this.showAlert('error', `文件夹上传失败：${errorCount} 个文件上传失败`);
+            }
+            
         } catch (error) {
             console.error('Folder upload error:', error);
             this.showAlert('error', '文件夹上传失败');
@@ -897,6 +930,14 @@ class NetdiskApp {
                 body: JSON.stringify(shareData)
             });
             
+            console.log('Share creation response:', data); // 调试信息
+            
+            // 检查必要字段是否存在
+            if (!data || !data.share_url || !data.share_id) {
+                console.error('Invalid share response:', data);
+                throw new Error('服务器返回数据不完整');
+            }
+            
             const shareUrl = `${window.location.origin}${data.share_url}`;
             
             const resultHtml = `
@@ -920,7 +961,11 @@ class NetdiskApp {
             this.showModal('分享链接已创建', resultHtml, resultFooter);
         } catch (error) {
             console.error('Create share error:', error);
-            this.showAlert('error', '创建分享失败');
+            let errorMessage = '创建分享失败';
+            if (error.message) {
+                errorMessage += ': ' + error.message;
+            }
+            this.showAlert('error', errorMessage);
         }
     }
     
@@ -1342,17 +1387,10 @@ class NetdiskApp {
         formData.append('path', this.currentPath);
         
         try {
-            this.showUploadProgress(true, `上传 ${files.length} 个文件...`);
+            this.showUploadProgress(true, `正在上传 ${files.length} 个文件...`);
+            this.updateProgress(0);
             
-            const response = await fetch('/files/upload', {
-                method: 'POST',
-                headers: {
-                    'Authorization': `Bearer ${this.accessToken}`,
-                },
-                body: formData
-            });
-            
-            const data = await response.json();
+            const data = await this.uploadWithProgress('/files/upload', formData);
             
             if (data.success) {
                 this.showAlert('success', data.message);
@@ -1395,6 +1433,62 @@ class NetdiskApp {
         }
     }
     
+    uploadWithProgress(url, formData) {
+        return new Promise((resolve, reject) => {
+            const xhr = new XMLHttpRequest();
+            
+            // 监听上传进度
+            xhr.upload.addEventListener('progress', (e) => {
+                if (e.lengthComputable) {
+                    const percentComplete = (e.loaded / e.total) * 100;
+                    this.updateProgress(percentComplete);
+                    
+                    // 更新进度文本
+                    const uploadText = document.getElementById('uploadText');
+                    const totalSizeMB = (e.total / (1024 * 1024)).toFixed(1);
+                    const loadedSizeMB = (e.loaded / (1024 * 1024)).toFixed(1);
+                    uploadText.textContent = `上传中... ${percentComplete.toFixed(1)}% (${loadedSizeMB}MB / ${totalSizeMB}MB)`;
+                }
+            });
+            
+            // 监听响应
+            xhr.addEventListener('load', () => {
+                if (xhr.status >= 200 && xhr.status < 300) {
+                    try {
+                        const data = JSON.parse(xhr.responseText);
+                        resolve(data);
+                    } catch (e) {
+                        reject(new Error('解析响应失败'));
+                    }
+                } else {
+                    reject(new Error(`HTTP Error: ${xhr.status}`));
+                }
+            });
+            
+            // 监听错误
+            xhr.addEventListener('error', () => {
+                reject(new Error('网络错误'));
+            });
+            
+            // 监听中止
+            xhr.addEventListener('abort', () => {
+                reject(new Error('上传被中止'));
+            });
+            
+            // 发送请求
+            xhr.open('POST', url);
+            xhr.setRequestHeader('Authorization', `Bearer ${this.accessToken}`);
+            xhr.send(formData);
+        });
+    }
+    
+    updateProgress(percentage) {
+        const progressFill = document.getElementById('progressFill');
+        if (progressFill) {
+            progressFill.style.width = `${Math.max(0, Math.min(100, percentage))}%`;
+        }
+    }
+    
     showUploadProgress(show, text = '上传中...') {
         const uploadProgress = document.getElementById('uploadProgress');
         const uploadText = document.getElementById('uploadText');
@@ -1402,13 +1496,100 @@ class NetdiskApp {
         if (show) {
             uploadText.textContent = text;
             uploadProgress.style.display = 'block';
+            this.updateProgress(0); // 初始化进度条
         } else {
             uploadProgress.style.display = 'none';
+            this.updateProgress(0); // 重置进度条
         }
     }
     
     hideUploadProgress() {
         this.showUploadProgress(false);
+    }
+    
+    // 批量操作方法
+    updateBatchActionsVisibility() {
+        const selectedItems = document.querySelectorAll('.file-item.selected');
+        const batchDownloadBtn = document.getElementById('batchDownloadBtn');
+        
+        if (selectedItems.length > 1) {
+            batchDownloadBtn.style.display = 'inline-block';
+        } else {
+            batchDownloadBtn.style.display = 'none';
+        }
+    }
+    
+    async downloadSelected() {
+        const selectedItems = document.querySelectorAll('.file-item.selected');
+        if (selectedItems.length === 0) {
+            this.showAlert('warning', '请选择要下载的文件');
+            return;
+        }
+        
+        const fileIds = Array.from(selectedItems).map(item => parseInt(item.dataset.id));
+        
+        try {
+            // 如果只有一个文件，直接下载
+            if (fileIds.length === 1) {
+                await this.downloadFile(fileIds[0]);
+                return;
+            }
+            
+            // 多个文件，使用批量下载API
+            const url = '/files/download/batch';
+            const response = await fetch(url, {
+                method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${this.accessToken}`,
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ file_ids: fileIds })
+            });
+            
+            if (!response.ok) {
+                throw new Error(`HTTP error! status: ${response.status}`);
+            }
+            
+            // 获取文件名
+            const contentDisposition = response.headers.get('Content-Disposition');
+            let filename = 'batch_download.zip';
+            if (contentDisposition) {
+                const rfc5987Match = contentDisposition.match(/filename\*=UTF-8''([^;]+)/);
+                if (rfc5987Match && rfc5987Match[1]) {
+                    try {
+                        filename = decodeURIComponent(rfc5987Match[1]);
+                    } catch (e) {
+                        console.warn('Failed to decode RFC 5987 filename:', e);
+                    }
+                } else {
+                    const matches = contentDisposition.match(/filename="?([^"]+)"?/);
+                    if (matches && matches[1]) {
+                        filename = matches[1];
+                    }
+                }
+            }
+            
+            // 创建下载链接
+            const blob = await response.blob();
+            const downloadUrl = URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.href = downloadUrl;
+            link.download = filename;
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            
+            // 清理 blob URL
+            URL.revokeObjectURL(downloadUrl);
+            
+            // 清除选中状态
+            selectedItems.forEach(item => item.classList.remove('selected'));
+            this.updateBatchActionsVisibility();
+            
+        } catch (error) {
+            console.error('Batch download error:', error);
+            this.showAlert('error', '批量下载失败：' + error.message);
+        }
     }
     
     showModal(title, body, footer = '') {
@@ -1453,6 +1634,136 @@ class NetdiskApp {
         const div = document.createElement('div');
         div.textContent = text;
         return div.innerHTML;
+    }
+    
+    // 分片上传相关方法
+    async calculateMD5(file) {
+        return new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                try {
+                    // 这里使用一个简化版本，实际项目中建议使用crypto-js等库
+                    const content = e.target.result;
+                    const hash = Array.from(new Uint8Array(content))
+                        .map(b => b.toString(16).padStart(2, '0'))
+                        .join('');
+                    resolve(hash.substring(0, 32)); // 简化的hash
+                } catch (error) {
+                    reject(error);
+                }
+            };
+            reader.onerror = reject;
+            reader.readAsArrayBuffer(file);
+        });
+    }
+    
+    async uploadSmallFile(file) {
+        const formData = new FormData();
+        formData.append('files', file);
+        formData.append('path', this.currentPath);
+        
+        const data = await this.uploadWithProgress('/files/upload', formData);
+        if (!data.success) {
+            throw new Error(data.message);
+        }
+        return data;
+    }
+    
+    async uploadSmallFileWithPath(file, relativePath) {
+        const formData = new FormData();
+        formData.append('files', file);
+        formData.append('path', this.currentPath);
+        formData.append('relative_paths', JSON.stringify([relativePath]));
+        
+        const data = await this.uploadWithProgress('/files/upload', formData);
+        if (!data.success) {
+            throw new Error(data.message);
+        }
+        return data;
+    }
+    
+    async uploadLargeFile(file, relativePath = null) {
+        const CHUNK_SIZE = 5 * 1024 * 1024; // 5MB per chunk
+        const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
+        
+        // 计算文件路径
+        let filePath = this.currentPath;
+        if (relativePath) {
+            // 文件夹上传，使用相对路径
+            const pathParts = relativePath.split('/');
+            pathParts.pop(); // 移除文件名
+            if (pathParts.length > 1) {
+                const dirPath = pathParts.slice(1).join('/'); // 移除第一个空元素
+                filePath = this.currentPath === '/' ? `/${dirPath}` : `${this.currentPath}/${dirPath}`;
+            }
+        }
+        
+        try {
+            // 初始化分片上传
+            const initData = await this.api('/files/chunk/init', {
+                method: 'POST',
+                body: JSON.stringify({
+                    filename: file.name,
+                    file_size: file.size,
+                    chunk_size: CHUNK_SIZE,
+                    path: filePath
+                })
+            });
+            
+            if (!initData.success) {
+                throw new Error(initData.message);
+            }
+            
+            const uploadId = initData.upload_id;
+            const uploadedChunks = new Set(initData.uploaded_chunks || []);
+            
+            // 上传各个分片
+            for (let chunkIndex = 0; chunkIndex < totalChunks; chunkIndex++) {
+                if (uploadedChunks.has(chunkIndex)) {
+                    continue; // 跳过已上传的分片
+                }
+                
+                const start = chunkIndex * CHUNK_SIZE;
+                const end = Math.min(start + CHUNK_SIZE, file.size);
+                const chunk = file.slice(start, end);
+                
+                const formData = new FormData();
+                formData.append('upload_id', uploadId);
+                formData.append('chunk_index', chunkIndex);
+                formData.append('chunk_file', chunk, `chunk_${chunkIndex}`);
+                
+                const chunkResult = await this.api('/files/chunk/upload', {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                if (!chunkResult.success) {
+                    throw new Error(`分片 ${chunkIndex} 上传失败: ${chunkResult.message}`);
+                }
+                
+                // 更新单个文件的进度（这里简化处理）
+                const progress = ((chunkIndex + 1) / totalChunks) * 100;
+                console.log(`文件 ${file.name} 上传进度: ${progress.toFixed(1)}%`);
+            }
+            
+            // 完成上传
+            const completeData = await this.api('/files/chunk/complete', {
+                method: 'POST',
+                body: JSON.stringify({
+                    upload_id: uploadId
+                })
+            });
+            
+            if (!completeData.success) {
+                throw new Error(completeData.message);
+            }
+            
+            return completeData;
+            
+        } catch (error) {
+            console.error('Large file upload error:', error);
+            throw error;
+        }
     }
     
     formatBytes(bytes, decimals = 2) {

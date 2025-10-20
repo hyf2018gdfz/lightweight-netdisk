@@ -13,6 +13,7 @@ from app.database import get_db
 from app.models.user import User
 from app.models.file import FileNode
 from app.services.file_service import FileService
+from app.services.chunk_upload_service import ChunkUploadService
 from app.utils.auth import get_current_user
 from app.utils.file_utils import (
     get_file_content, get_text_content, create_zip_from_nodes,
@@ -22,7 +23,10 @@ from app.utils.file_utils import (
 from app.schemas.file import (
     FileUploadResponse, DirectoryCreateRequest, FileNodeResponse,
     DirectoryListResponse, RenameRequest, MoveRequest,
-    SearchRequest, SearchResponse
+    SearchRequest, SearchResponse, BatchDownloadRequest,
+    ChunkUploadInitRequest, ChunkUploadInitResponse,
+    ChunkUploadRequest, ChunkUploadResponse,
+    ChunkUploadCompleteRequest, ChunkUploadCompleteResponse
 )
 from app.config import MAX_FILE_SIZE
 import io
@@ -455,3 +459,184 @@ async def search_files(
         results=items,
         total=len(items)
     )
+
+
+@router.post("/download/batch")
+async def batch_download(
+    request: BatchDownloadRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """批量下载文件（ZIP打包）"""
+    file_service = FileService(db)
+    
+    # 获取所有文件节点
+    nodes = []
+    for file_id in request.file_ids:
+        node = file_service.get_node_by_id(file_id, current_user)
+        if node:
+            nodes.append(node)
+    
+    if not nodes:
+        raise HTTPException(status_code=404, detail="没有找到指定的文件")
+    
+    # 生成ZIP文件
+    try:
+        zip_content = create_zip_from_nodes(nodes)
+        
+        # 生成ZIP文件名
+        if len(nodes) == 1:
+            zip_filename = f"{nodes[0].name}.zip"
+        else:
+            zip_filename = f"batch_download_{len(nodes)}_files.zip"
+        
+        return StreamingResponse(
+            io.BytesIO(zip_content),
+            media_type='application/zip',
+            headers={"Content-Disposition": encode_filename_for_content_disposition(zip_filename)}
+        )
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"打包失败: {str(e)}")
+
+
+# 分片上传相关端点
+
+@router.post("/chunk/init", response_model=ChunkUploadInitResponse)
+async def init_chunk_upload(
+    request: ChunkUploadInitRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """初始化分片上传"""
+    try:
+        chunk_service = ChunkUploadService(db)
+        upload_id, total_chunks, uploaded_chunks = chunk_service.init_chunk_upload(
+            request.filename,
+            request.file_size,
+            request.chunk_size,
+            request.path,
+            current_user,
+            request.file_hash
+        )
+        
+        return ChunkUploadInitResponse(
+            success=True,
+            message="分片上传初始化成功",
+            upload_id=upload_id,
+            total_chunks=total_chunks,
+            uploaded_chunks=uploaded_chunks
+        )
+        
+    except Exception as e:
+        return ChunkUploadInitResponse(
+            success=False,
+            message=f"初始化失败: {str(e)}"
+        )
+
+
+@router.post("/chunk/upload", response_model=ChunkUploadResponse)
+async def upload_chunk(
+    upload_id: str = Form(...),
+    chunk_index: int = Form(...),
+    chunk_hash: str = Form(""),
+    chunk_file: UploadFile = File(...),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """上传单个分片"""
+    try:
+        chunk_service = ChunkUploadService(db)
+        
+        # 读取分片数据
+        chunk_data = await chunk_file.read()
+        
+        # 上传分片
+        success = chunk_service.upload_chunk(
+            upload_id,
+            chunk_index,
+            chunk_data,
+            current_user,
+            chunk_hash if chunk_hash else None
+        )
+        
+        return ChunkUploadResponse(
+            success=success,
+            message="分片上传成功",
+            chunk_index=chunk_index,
+            received=True
+        )
+        
+    except Exception as e:
+        return ChunkUploadResponse(
+            success=False,
+            message=f"分片上传失败: {str(e)}",
+            chunk_index=chunk_index,
+            received=False
+        )
+
+
+@router.post("/chunk/complete", response_model=ChunkUploadCompleteResponse)
+async def complete_chunk_upload(
+    request: ChunkUploadCompleteRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """完成分片上传"""
+    try:
+        chunk_service = ChunkUploadService(db)
+        
+        # 完成上传
+        file_info = chunk_service.complete_chunk_upload(
+            request.upload_id,
+            current_user,
+            request.file_hash
+        )
+        
+        return ChunkUploadCompleteResponse(
+            success=True,
+            message="文件上传完成",
+            file_info=file_info
+        )
+        
+    except Exception as e:
+        return ChunkUploadCompleteResponse(
+            success=False,
+            message=f"完成上传失败: {str(e)}"
+        )
+
+
+@router.get("/chunk/status/{upload_id}")
+async def get_chunk_upload_status(
+    upload_id: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """获取分片上传状态"""
+    try:
+        chunk_service = ChunkUploadService(db)
+        status = chunk_service.get_upload_status(upload_id, current_user)
+        return {"success": True, "data": status}
+        
+    except Exception as e:
+        return {"success": False, "message": str(e)}
+
+
+@router.delete("/chunk/cancel/{upload_id}")
+async def cancel_chunk_upload(
+    upload_id: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """取消分片上传"""
+    try:
+        chunk_service = ChunkUploadService(db)
+        success = chunk_service.cancel_upload(upload_id, current_user)
+        
+        if success:
+            return {"success": True, "message": "上传已取消"}
+        else:
+            return {"success": False, "message": "上传会话不存在"}
+            
+    except Exception as e:
+        return {"success": False, "message": str(e)}

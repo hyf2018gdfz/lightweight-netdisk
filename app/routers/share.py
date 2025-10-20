@@ -61,15 +61,24 @@ async def create_share(
         if not node:
             raise HTTPException(status_code=404, detail="文件不存在")
         
-        # 检查是否已存在分享链接
+        # 检查是否已存在有效的分享链接
         existing_share = db.query(ShareLink).filter(
             ShareLink.file_node_id == request.file_node_id,
             ShareLink.creator_id == current_user.id,
             ShareLink.is_active == True
         ).first()
         
-        if existing_share:
-            raise HTTPException(status_code=400, detail="该文件已存在分享链接")
+        # 如果已存在有效的分享链接，直接返回
+        if existing_share and existing_share.is_accessible:
+            return ShareResponse(
+                share_id=existing_share.share_id,
+                share_url=f"/share/{existing_share.share_id}",
+                expire_at=existing_share.expire_at,
+                max_downloads=existing_share.max_downloads,
+                has_password=existing_share.password is not None,
+                description=existing_share.description,
+                file_info=file_service.get_node_info(node)
+            )
         
         # 生成唆一分享 ID
         share_id = ShareLink.generate_share_id()
