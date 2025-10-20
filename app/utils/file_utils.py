@@ -116,22 +116,14 @@ def _add_node_to_zip(zipf: zipfile.ZipFile, node: FileNode, base_path: str = "",
         root_path = root_node.full_path.rstrip('/')
         node_path = node.full_path
         if node_path.startswith(root_path + '/'):
+            # 保持文件夹结构：从根节点名开始的完整路径
             relative_path = node_path[len(root_path) + 1:]
-            zip_path = relative_path
+            zip_path = f"{root_node.name}/{relative_path}"
         else:
             zip_path = node.name
     elif root_node and node == root_node:
-        # 如果当前节点就是根节点，由于我们要保持内部结构，直接递归处理子节点
-        if node.is_directory:
-            children = node.get_children()
-            if not children:
-                # 空目录，不需要创建目录项
-                pass
-            else:
-                # 递归添加子节点
-                for child in children:
-                    _add_node_to_zip(zipf, child, base_path, root_node)
-        return
+        # 如果当前节点就是根节点，使用根节点的名称作为基础路径
+        zip_path = node.name
     else:
         # 使用基本路径拼接
         if base_path:
@@ -155,6 +147,8 @@ def _add_node_to_zip(zipf: zipfile.ZipFile, node: FileNode, base_path: str = "",
             # 空目录，添加一个以/结尾的路径
             zipf.writestr(zip_path + '/', '')
         else:
+            # 创建目录项（即使非空目录也要创建目录项以保持结构）
+            zipf.writestr(zip_path + '/', '')
             # 递归添加子节点
             for child in children:
                 _add_node_to_zip(zipf, child, zip_path, root_node)

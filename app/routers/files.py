@@ -272,8 +272,8 @@ async def download_file(
     
     elif node.is_directory:
         # 打包目录为ZIP下载
-        children = [node] + node.get_all_descendants()
-        zip_content = create_zip_from_nodes(children)
+        # 只传递根节点，递归逻辑在 _add_node_to_zip 中处理
+        zip_content = create_zip_from_nodes([node])
         
         zip_filename = f"{node.name}.zip"
         
@@ -517,7 +517,8 @@ async def init_chunk_upload(
             request.chunk_size,
             request.path,
             current_user,
-            request.file_hash
+            request.file_hash,
+            request.file_metadata.dict() if request.file_metadata else None
         )
         
         return ChunkUploadInitResponse(

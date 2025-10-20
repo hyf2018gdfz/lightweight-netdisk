@@ -124,7 +124,7 @@ class FileService:
             return node
         return self.create_directory(path, user)
     
-    def save_uploaded_file(self, file_path: str, content: bytes, user: User) -> FileNode:
+    def save_uploaded_file(self, file_path: str, content: bytes, user: User, file_metadata: dict = None) -> FileNode:
         """保存上传的文件"""
         # 检查路径是否已存在
         if self.get_node_by_path(file_path, user):
@@ -173,6 +173,19 @@ class FileService:
         self.db.add(file_node)
         self.db.commit()
         self.db.refresh(file_node)
+        
+        # 如果有元数据，更新文件的时间戳
+        if file_metadata and file_metadata.get('lastModified'):
+            try:
+                # 将毫秒时间戳转换为datetime
+                from datetime import datetime
+                original_time = datetime.fromtimestamp(file_metadata['lastModified'] / 1000)
+                file_node.created_at = original_time
+                file_node.updated_at = original_time
+                self.db.commit()
+            except Exception as e:
+                # 如果时间戳转换失败，忽略错误
+                print(f"Warning: Failed to set file timestamp: {e}")
         
         return file_node
     

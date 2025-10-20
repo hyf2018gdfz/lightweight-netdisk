@@ -28,7 +28,8 @@ class ChunkUploadService:
         os.makedirs(self.upload_dir, exist_ok=True)
     
     def init_chunk_upload(self, filename: str, file_size: int, chunk_size: int, 
-                         path: str, user: User, file_hash: Optional[str] = None) -> Tuple[str, int, List[int]]:
+                         path: str, user: User, file_hash: Optional[str] = None, 
+                         file_metadata: Optional[dict] = None) -> Tuple[str, int, List[int]]:
         """初始化分片上传"""
         # 生成上传ID
         upload_id = str(uuid.uuid4())
@@ -52,7 +53,8 @@ class ChunkUploadService:
             "file_hash": file_hash,
             "created_at": datetime.now().isoformat(),
             "uploaded_chunks": [],
-            "status": "uploading"
+            "status": "uploading",
+            "file_metadata": file_metadata  # 保存原始文件元数据
         }
         
         metadata_file = os.path.join(upload_path, "metadata.json")
@@ -164,7 +166,7 @@ class ChunkUploadService:
                 self.file_service.ensure_directory_exists(dir_path, user)
             
             # 保存文件
-            file_node = self.file_service.save_uploaded_file(file_path, file_content, user)
+            file_node = self.file_service.save_uploaded_file(file_path, file_content, user, metadata.get('file_metadata'))
             
             # 更新元数据状态
             metadata["status"] = "completed"

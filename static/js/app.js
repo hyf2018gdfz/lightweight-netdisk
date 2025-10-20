@@ -829,18 +829,54 @@ class NetdiskApp {
                     
                     console.log('Audio preview:', { contentType, blobSize: blob.size, audioUrl });
                     
+                    // 创建音频元素并添加错误处理
+                    const audioId = 'preview-audio-' + Date.now();
+                    
                     this.showModal('音频预览', `
                         <div class="media-preview">
-                            <audio controls style="width: 100%; max-width: 500px;" preload="metadata">
+                            <audio id="${audioId}" controls style="width: 100%; max-width: 500px;" preload="metadata">
                                 <source src="${audioUrl}" type="${contentType}">
                                 您的浏览器不支持音频播放。
                             </audio>
-                            <p><small>MIME 类型: ${contentType} | 文件大小: ${this.formatBytes(blob.size)}</small></p>
+                            <div id="audio-info">
+                                <p><small>MIME 类型: ${contentType} | 文件大小: ${this.formatBytes(blob.size)}</small></p>
+                                <div id="audio-status" class="mt-2"></div>
+                            </div>
                         </div>
                     `, `
                         <button type="button" class="btn btn-secondary" onclick="window.open('${audioUrl}', '_blank')">在新窗口播放</button>
                         <button type="button" class="btn btn-primary" onclick="app.closeModal(); URL.revokeObjectURL('${audioUrl}')">关闭</button>
                     `);
+                    
+                    // 添加音频加载和错误事件监听器
+                    setTimeout(() => {
+                        const audioElement = document.getElementById(audioId);
+                        const statusDiv = document.getElementById('audio-status');
+                        
+                        if (audioElement && statusDiv) {
+                            audioElement.addEventListener('loadstart', () => {
+                                statusDiv.innerHTML = '<small class="text-info">🔄 加载中...</small>';
+                            });
+                            
+                            audioElement.addEventListener('canplay', () => {
+                                statusDiv.innerHTML = '<small class="text-success">✅ 音频已准备就绪</small>';
+                            });
+                            
+                            audioElement.addEventListener('error', (e) => {
+                                console.error('Audio loading error:', e);
+                                statusDiv.innerHTML = '<small class="text-error">❌ 音频加载失败，可能文件格式不受支持</small>';
+                            });
+                            
+                            audioElement.addEventListener('loadedmetadata', () => {
+                                const duration = audioElement.duration;
+                                if (duration && duration > 0) {
+                                    const minutes = Math.floor(duration / 60);
+                                    const seconds = Math.floor(duration % 60);
+                                    statusDiv.innerHTML += `<br><small>时长: ${minutes}:${seconds.toString().padStart(2, '0')}</small>`;
+                                }
+                            });
+                        }
+                    }, 100);
                 } else if (contentType && contentType.startsWith('video/')) {
                     // 视频预览
                     const blob = await response.blob();
@@ -1732,6 +1768,15 @@ class NetdiskApp {
         formData.append('files', file);
         formData.append('path', this.currentPath);
         
+        // 添加文件元数据
+        if (file.lastModified) {
+            formData.append('file_metadata', JSON.stringify({
+                lastModified: file.lastModified,
+                originalName: file.name,
+                size: file.size
+            }));
+        }
+        
         const data = await this.uploadWithProgress('/files/upload', formData);
         if (!data.success) {
             throw new Error(data.message);
@@ -1745,11 +1790,71 @@ class NetdiskApp {
         formData.append('path', this.currentPath);
         formData.append('relative_paths', JSON.stringify([relativePath]));
         
+        // 添加文件元数据
+        if (file.lastModified) {
+            formData.append('file_metadata', JSON.stringify([{
+                lastModified: file.lastModified,
+                originalName: file.name,
+                size: file.size
+            }]));
+        }
+        
         const data = await this.uploadWithProgress('/files/upload', formData);
         if (!data.success) {
             throw new Error(data.message);
         }
         return data;
+    }
+    
+    // 延迟方法
+    delay(ms) {
+        return new Promise(resolve => setTimeout(resolve, ms));
+    }
+    
+    // 带重试机制的分片上传
+    async uploadChunkWithRetry(uploadId, chunkIndex, chunk, maxRetries = 3) {
+        for (let attempt = 1; attempt <= maxRetries; attempt++) {
+            try {
+                const formData = new FormData();
+                formData.append('upload_id', uploadId);
+                formData.append('chunk_index', chunkIndex);
+                formData.append('chunk_file', chunk, `chunk_${chunkIndex}`);
+                
+                const chunkResult = await this.api('/files/chunk/upload', {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                if (chunkResult.success) {
+                    return true;
+                } else {
+                    console.warn(`分片 ${chunkIndex} 上传失败 (第${attempt}次尝试): ${chunkResult.message}`);
+                    
+                    if (attempt < maxRetries) {
+                        // 指数退避策略：第一次重试1秒，第二次重试3秒
+                        const delayMs = Math.pow(2, attempt - 1) * 1000;
+                        console.log(`等待 ${delayMs}ms 后重试...`);
+                        await this.delay(delayMs);
+                    }
+                }
+            } catch (error) {
+                console.error(`分片 ${chunkIndex} 上传错误 (第${attempt}次尝试):`, error);
+                
+                // 如果是429错误，等待更长时间
+                if (error.message && error.message.includes('429')) {
+                    const delayMs = Math.pow(2, attempt) * 2000; // 更长的延迟
+                    console.log(`检测到429错误，等待 ${delayMs}ms 后重试...`);
+                    await this.delay(delayMs);
+                } else if (attempt < maxRetries) {
+                    // 普通错误，指数退避
+                    const delayMs = Math.pow(2, attempt - 1) * 1000;
+                    console.log(`等待 ${delayMs}ms 后重试...`);
+                    await this.delay(delayMs);
+                }
+            }
+        }
+        
+        return false; // 所有重试都失败
     }
     
     async uploadLargeFile(file, relativePath = null) {
@@ -1784,7 +1889,12 @@ class NetdiskApp {
                     filename: fileName,
                     file_size: file.size,
                     chunk_size: CHUNK_SIZE,
-                    path: filePath
+                    path: filePath,
+                    file_metadata: file.lastModified ? {
+                        lastModified: file.lastModified,
+                        originalName: file.name,
+                        size: file.size
+                    } : null
                 })
             });
             
@@ -1805,23 +1915,20 @@ class NetdiskApp {
                 const end = Math.min(start + CHUNK_SIZE, file.size);
                 const chunk = file.slice(start, end);
                 
-                const formData = new FormData();
-                formData.append('upload_id', uploadId);
-                formData.append('chunk_index', chunkIndex);
-                formData.append('chunk_file', chunk, `chunk_${chunkIndex}`);
-                
-                const chunkResult = await this.api('/files/chunk/upload', {
-                    method: 'POST',
-                    body: formData
-                });
-                
-                if (!chunkResult.success) {
-                    throw new Error(`分片 ${chunkIndex} 上传失败: ${chunkResult.message}`);
+                // 带重试机制的分片上传
+                const success = await this.uploadChunkWithRetry(uploadId, chunkIndex, chunk, 3);
+                if (!success) {
+                    throw new Error(`分片 ${chunkIndex} 上传失败（已重试多次）`);
                 }
                 
                 // 更新单个文件的进度（这里简化处理）
                 const progress = ((chunkIndex + 1) / totalChunks) * 100;
                 console.log(`文件 ${file.name} 上传进度: ${progress.toFixed(1)}%`);
+                
+                // 添加小延迟防止请求过于频繁
+                if (chunkIndex < totalChunks - 1) {
+                    await this.delay(100); // 100ms延迟
+                }
             }
             
             // 完成上传

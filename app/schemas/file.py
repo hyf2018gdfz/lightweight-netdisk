@@ -156,6 +156,13 @@ class BatchDownloadRequest(BaseModel):
         return v
 
 
+class FileMetadata(BaseModel):
+    """文件元数据"""
+    lastModified: Optional[int] = None  # 文件最后修改时间戳
+    originalName: Optional[str] = None
+    size: Optional[int] = None
+
+
 class ChunkUploadInitRequest(BaseModel):
     """分片上传初始化请求"""
     filename: str
@@ -163,6 +170,7 @@ class ChunkUploadInitRequest(BaseModel):
     chunk_size: int
     path: str = "/"
     file_hash: Optional[str] = None  # 文件MD5哈希，用于校验
+    file_metadata: Optional[FileMetadata] = None  # 文件元数据
     
     @validator('filename')
     def validate_filename(cls, v):
