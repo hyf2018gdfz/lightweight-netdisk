@@ -809,9 +809,11 @@ class NetdiskApp {
     async previewFile(fileId) {
         try {
             const response = await fetch(`/files/preview/${fileId}`, {
+                method: 'GET',
                 headers: {
                     'Authorization': `Bearer ${this.accessToken}`,
-                }
+                },
+                credentials: 'same-origin'
             });
             
             if (response.ok) {
@@ -827,20 +829,32 @@ class NetdiskApp {
                     const blob = await response.blob();
                     const audioUrl = URL.createObjectURL(blob);
                     
-                    console.log('Audio preview:', { contentType, blobSize: blob.size, audioUrl });
+                    console.log('Audio preview debug:', {
+                        contentType,
+                        blobSize: blob.size,
+                        blobType: blob.type,
+                        audioUrl,
+                        responseHeaders: Object.fromEntries([...response.headers])
+                    });
                     
                     // 创建音频元素并添加错误处理
                     const audioId = 'preview-audio-' + Date.now();
                     
+                    // 先显示模态框
                     this.showModal('音频预览', `
                         <div class="media-preview">
-                            <audio id="${audioId}" controls style="width: 100%; max-width: 500px;" preload="metadata">
-                                <source src="${audioUrl}" type="${contentType}">
-                                您的浏览器不支持音频播放。
-                            </audio>
+                            <div id="audio-container">
+                                <audio id="${audioId}" controls style="width: 100%; max-width: 500px;" preload="auto" crossorigin="anonymous">
+                                    <source src="${audioUrl}" type="${contentType}">
+                                    您的浏览器不支持音频播放。
+                                </audio>
+                            </div>
                             <div id="audio-info">
                                 <p><small>MIME 类型: ${contentType} | 文件大小: ${this.formatBytes(blob.size)}</small></p>
-                                <div id="audio-status" class="mt-2"></div>
+                                <div id="audio-status" class="mt-2">
+                                    <small class="text-info">🔄 初始化中...</small>
+                                </div>
+                                <div id="audio-debug" class="mt-2" style="font-size: 11px; color: #666;"></div>
                             </div>
                         </div>
                     `, `
@@ -852,29 +866,76 @@ class NetdiskApp {
                     setTimeout(() => {
                         const audioElement = document.getElementById(audioId);
                         const statusDiv = document.getElementById('audio-status');
+                        const debugDiv = document.getElementById('audio-debug');
                         
-                        if (audioElement && statusDiv) {
+                        if (audioElement && statusDiv && debugDiv) {
+                            // 显示调试信息
+                            debugDiv.innerHTML = `
+                                Blob URL: ${audioUrl}<br>
+                                Blob Size: ${blob.size} bytes<br>
+                                Blob Type: ${blob.type || '未知'}<br>
+                                Response Type: ${contentType}
+                            `;
+                            
+                            // 加载事件
                             audioElement.addEventListener('loadstart', () => {
-                                statusDiv.innerHTML = '<small class="text-info">🔄 加载中...</small>';
+                                console.log('Audio: loadstart event');
+                                statusDiv.innerHTML = '<small class="text-info">🔄 开始加载...</small>';
+                            });
+                            
+                            audioElement.addEventListener('loadeddata', () => {
+                                console.log('Audio: loadeddata event');
+                                statusDiv.innerHTML = '<small class="text-info">🔄 数据已加载...</small>';
                             });
                             
                             audioElement.addEventListener('canplay', () => {
+                                console.log('Audio: canplay event');
                                 statusDiv.innerHTML = '<small class="text-success">✅ 音频已准备就绪</small>';
                             });
                             
+                            audioElement.addEventListener('canplaythrough', () => {
+                                console.log('Audio: canplaythrough event');
+                                statusDiv.innerHTML = '<small class="text-success">✅ 音频已完全加载</small>';
+                            });
+                            
                             audioElement.addEventListener('error', (e) => {
-                                console.error('Audio loading error:', e);
-                                statusDiv.innerHTML = '<small class="text-error">❌ 音频加载失败，可能文件格式不受支持</small>';
+                                console.error('Audio loading error:', e, audioElement.error);
+                                let errorMsg = '未知错误';
+                                if (audioElement.error) {
+                                    switch(audioElement.error.code) {
+                                        case 1: errorMsg = 'MEDIA_ERR_ABORTED: 播放被中止'; break;
+                                        case 2: errorMsg = 'MEDIA_ERR_NETWORK: 网络错误'; break;
+                                        case 3: errorMsg = 'MEDIA_ERR_DECODE: 解码错误'; break;
+                                        case 4: errorMsg = 'MEDIA_ERR_SRC_NOT_SUPPORTED: 不支持的格式'; break;
+                                    }
+                                }
+                                statusDiv.innerHTML = `<small class="text-error">❌ ${errorMsg}</small>`;
                             });
                             
                             audioElement.addEventListener('loadedmetadata', () => {
+                                console.log('Audio: loadedmetadata event, duration:', audioElement.duration);
                                 const duration = audioElement.duration;
-                                if (duration && duration > 0) {
+                                if (duration && duration > 0 && isFinite(duration)) {
                                     const minutes = Math.floor(duration / 60);
                                     const seconds = Math.floor(duration % 60);
                                     statusDiv.innerHTML += `<br><small>时长: ${minutes}:${seconds.toString().padStart(2, '0')}</small>`;
                                 }
                             });
+                            
+                            audioElement.addEventListener('play', () => {
+                                console.log('Audio: play event');
+                            });
+                            
+                            audioElement.addEventListener('pause', () => {
+                                console.log('Audio: pause event');
+                            });
+                            
+                            // 尝试预加载
+                            try {
+                                audioElement.load();
+                            } catch (e) {
+                                console.error('Failed to load audio:', e);
+                            }
                         }
                     }, 100);
                 } else if (contentType && contentType.startsWith('video/')) {

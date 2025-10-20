@@ -53,9 +53,10 @@ class FileNode(Base):
     @property
     def physical_path(self) -> str:
         """获取物理存储路径"""
+        from app.config import STORAGE_DIR, TRASH_DIR
         if self.is_deleted:
-            return os.path.join("trash", self.full_path.lstrip('/'))
-        return os.path.join("storage", self.full_path.lstrip('/'))
+            return os.path.join(str(TRASH_DIR), self.full_path.lstrip('/'))
+        return os.path.join(str(STORAGE_DIR), self.full_path.lstrip('/'))
     
     def get_children(self, include_deleted=False):
         """获取子节点"""
@@ -71,3 +72,29 @@ class FileNode(Base):
             descendants.append(child)
             descendants.extend(child.get_all_descendants(include_deleted))
         return descendants
+    
+    def is_effectively_deleted(self):
+        """检查节点是否被删除（包括通过父目录的删除状态）"""
+        if self.is_deleted:
+            return True
+        
+        # 检查父目录是否被删除
+        current = self.parent
+        while current:
+            if current.is_deleted:
+                return True
+            current = current.parent
+        
+        return False
+    
+    def get_top_level_deleted_ancestor(self):
+        """获取顶级被删除的祖先节点"""
+        current = self
+        top_deleted = None
+        
+        while current:
+            if current.is_deleted:
+                top_deleted = current
+            current = current.parent
+        
+        return top_deleted

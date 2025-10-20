@@ -24,11 +24,30 @@ async def list_trash(
     db: Session = Depends(get_db)
 ):
     """获取回收站文件列表"""
-    # 查询用户删除的文件
+    # 查询用户顶级删除的文件（只显示没有被删除父目录的项目）
     deleted_files = db.query(FileNode).filter(
         FileNode.owner_id == current_user.id,
         FileNode.is_deleted == True
-    ).order_by(FileNode.deleted_at.desc()).all()
+    ).all()
+    
+    # 过滤出顶级删除项目（没有被删除的父目录）
+    top_level_deleted = []
+    for node in deleted_files:
+        # 检查是否有被删除的父目录
+        has_deleted_parent = False
+        current = node.parent
+        while current:
+            if current.is_deleted:
+                has_deleted_parent = True
+                break
+            current = current.parent
+        
+        if not has_deleted_parent:
+            top_level_deleted.append(node)
+    
+    # 按删除时间排序
+    top_level_deleted.sort(key=lambda x: x.deleted_at, reverse=True)
+    deleted_files = top_level_deleted
     
     # 转换为响应模型
     file_service = FileService(db)

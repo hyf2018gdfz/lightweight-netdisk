@@ -17,10 +17,11 @@ from app.database import init_db
 from app.utils.file_cleaner import start_file_cleaner
 from app.middleware.security import SecurityHeadersMiddleware
 from app.middleware.rate_limit import RateLimitMiddleware
+from app.config import STORAGE_DIR, TRASH_DIR
 
 # 创建必要的目录
-os.makedirs("storage", exist_ok=True)
-os.makedirs("trash", exist_ok=True)
+os.makedirs(str(STORAGE_DIR), exist_ok=True)
+os.makedirs(str(TRASH_DIR), exist_ok=True)
 os.makedirs("static", exist_ok=True)
 os.makedirs("templates", exist_ok=True)
 

@@ -28,6 +28,8 @@ class FileService:
         )
         
         if not include_deleted:
+            # Windows式回收站：只过滤掉直接被标记为删除的项目
+            # 子项目的删除状态继承自父项目
             query = query.filter(FileNode.is_deleted == False)
             
         return query.first()
@@ -40,6 +42,8 @@ class FileService:
         )
         
         if not include_deleted:
+            # Windows式回收站：只过滤掉直接被标记为删除的项目
+            # 子项目的删除状态继承自父项目
             query = query.filter(FileNode.is_deleted == False)
             
         return query.first()
@@ -205,11 +209,8 @@ class FileService:
         node.is_deleted = True
         node.deleted_at = datetime.utcnow()
         
-        # 如果是目录，递归删除子节点
-        if node.is_directory:
-            for child in node.get_all_descendants():
-                child.is_deleted = True
-                child.deleted_at = datetime.utcnow()
+        # Windows式回收站：只标记顶级项目为删除，子项目不单独标记
+        # 子项目的删除状态通过父目录的删除状态隐式确定
         
         self.db.commit()
         return True
@@ -234,12 +235,8 @@ class FileService:
         node.is_deleted = False
         node.deleted_at = None
         
-        # 如果是目录，递归恢复子节点
-        if node.is_directory:
-            for child in node.get_all_descendants(include_deleted=True):
-                if child.is_deleted:
-                    child.is_deleted = False
-                    child.deleted_at = None
+        # Windows式回收站：只恢复顶级项目，子项目不需要单独恢复
+        # 子项目的恢复状态通过父目录的恢复状态隐式确定
         
         self.db.commit()
         return True
@@ -279,9 +276,16 @@ class FileService:
                     else:
                         shutil.rmtree(original_path)
             
-            # 删除数据库记录（级联删除子节点）
+            # 删除数据库记录（包括所有子节点）
             if node.is_directory:
-                for child in node.get_all_descendants(include_deleted=True):
+                # 递归删除所有子节点（无论是否被标记为删除）
+                all_children = node.get_all_descendants(include_deleted=True)
+                for child in all_children:
+                    # 先删除子节点的分享链接
+                    from app.models.share import ShareLink
+                    child_share_links = self.db.query(ShareLink).filter(ShareLink.file_node_id == child.id).all()
+                    for share_link in child_share_links:
+                        self.db.delete(share_link)
                     self.db.delete(child)
             
             self.db.delete(node)
@@ -299,7 +303,8 @@ class FileService:
                     self.db.delete(share_link)
                 
                 if node.is_directory:
-                    for child in node.get_all_descendants(include_deleted=True):
+                    all_children = node.get_all_descendants(include_deleted=True)
+                    for child in all_children:
                         child_share_links = self.db.query(ShareLink).filter(ShareLink.file_node_id == child.id).all()
                         for share_link in child_share_links:
                             self.db.delete(share_link)

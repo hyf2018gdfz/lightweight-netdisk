@@ -7,7 +7,7 @@ from pathlib import Path
 
 # 基础配置
 BASE_DIR = Path(__file__).parent.parent
-STORAGE_DIR = BASE_DIR / "storage"
+STORAGE_DIR = BASE_DIR / "files"
 TRASH_DIR = BASE_DIR / "trash"
 DATABASE_URL = f"sqlite:///{BASE_DIR}/netdisk.db"
 
