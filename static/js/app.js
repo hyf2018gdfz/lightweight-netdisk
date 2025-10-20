@@ -197,10 +197,13 @@ class NetdiskApp {
     // API 请求方法
     async api(url, options = {}) {
         const defaultOptions = {
-            headers: {
-                'Content-Type': 'application/json',
-            },
+            headers: {},
         };
+        
+        // 只有在不是FormData时才设置Content-Type
+        if (!(options.body instanceof FormData)) {
+            defaultOptions.headers['Content-Type'] = 'application/json';
+        }
         
         if (this.accessToken) {
             defaultOptions.headers['Authorization'] = `Bearer ${this.accessToken}`;
@@ -214,6 +217,11 @@ class NetdiskApp {
                 ...options.headers,
             },
         };
+        
+        // 如果是FormData，移除Content-Type让浏览器自动设置
+        if (options.body instanceof FormData && mergedOptions.headers['Content-Type']) {
+            delete mergedOptions.headers['Content-Type'];
+        }
         
         const response = await fetch(url, mergedOptions);
         
@@ -954,7 +962,7 @@ class NetdiskApp {
             `;
             
             const resultFooter = `
-                <button type="button" class="btn btn-secondary" onclick="navigator.clipboard.writeText('${shareUrl}').then(() => app.showAlert('success', '链接已复制到剪贴板'))">复制链接</button>
+                <button type="button" class="btn btn-secondary" onclick="app.copyToClipboard('${shareUrl}')">复制链接</button>
                 <button type="button" class="btn btn-primary" onclick="app.closeModal()">完成</button>
             `;
             
@@ -1303,13 +1311,7 @@ class NetdiskApp {
     
     async copyShareLink(shareId) {
         const shareUrl = `${window.location.origin}/share/${shareId}`;
-        try {
-            await navigator.clipboard.writeText(shareUrl);
-            this.showAlert('success', '分享链接已复制到剪贴板');
-        } catch (error) {
-            console.error('Copy error:', error);
-            this.showAlert('error', '复制失败');
-        }
+        await this.copyToClipboard(shareUrl);
     }
     
     async viewShareStats(shareId) {
@@ -1380,24 +1382,47 @@ class NetdiskApp {
     }
     
     async handleDragUpload(files) {
-        const formData = new FormData();
-        files.forEach(file => {
-            formData.append('files', file);
-        });
-        formData.append('path', this.currentPath);
-        
         try {
             this.showUploadProgress(true, `正在上传 ${files.length} 个文件...`);
-            this.updateProgress(0);
             
-            const data = await this.uploadWithProgress('/files/upload', formData);
+            // 检查是否有大文件需要分片上传
+            const CHUNK_SIZE_THRESHOLD = 50 * 1024 * 1024; // 50MB
+            let successCount = 0;
+            let errorCount = 0;
             
-            if (data.success) {
-                this.showAlert('success', data.message);
-                this.loadFileList();
-            } else {
-                this.showAlert('error', data.message);
+            for (let i = 0; i < files.length; i++) {
+                const file = files[i];
+                try {
+                    if (file.size > CHUNK_SIZE_THRESHOLD) {
+                        // 大文件，使用分片上传
+                        this.updateProgress((i / files.length) * 100);
+                        await this.uploadLargeFile(file);
+                    } else {
+                        // 小文件，使用常规上传
+                        await this.uploadSmallFile(file);
+                    }
+                    successCount++;
+                } catch (error) {
+                    console.error(`Drag upload error for file ${file.name}:`, error);
+                    errorCount++;
+                }
+                
+                // 更新总进度
+                this.updateProgress(((i + 1) / files.length) * 100);
             }
+            
+            // 显示结果
+            if (successCount > 0) {
+                let message = `成功上传 ${successCount} 个文件`;
+                if (errorCount > 0) {
+                    message += `，${errorCount} 个文件失败`;
+                }
+                this.showAlert('success', message);
+                this.loadFileList();
+            } else if (errorCount > 0) {
+                this.showAlert('error', `拖拽上传失败：${errorCount} 个文件上传失败`);
+            }
+            
         } catch (error) {
             console.error('Drag upload error:', error);
             this.showAlert('error', '拖拽上传失败');
@@ -1636,6 +1661,51 @@ class NetdiskApp {
         return div.innerHTML;
     }
     
+    async copyToClipboard(text) {
+        try {
+            if (navigator.clipboard && window.isSecureContext) {
+                // 使用现代的Clipboard API
+                await navigator.clipboard.writeText(text);
+                this.showAlert('success', '链接已复制到剪贴板');
+            } else {
+                // 后备方案：使用传统的方法
+                this.fallbackCopyTextToClipboard(text);
+            }
+        } catch (err) {
+            console.error('复制失败:', err);
+            this.fallbackCopyTextToClipboard(text);
+        }
+    }
+    
+    fallbackCopyTextToClipboard(text) {
+        try {
+            const textArea = document.createElement('textarea');
+            textArea.value = text;
+            
+            // 避免滚动到页面底部
+            textArea.style.top = '0';
+            textArea.style.left = '0';
+            textArea.style.position = 'fixed';
+            textArea.style.opacity = '0';
+            
+            document.body.appendChild(textArea);
+            textArea.focus();
+            textArea.select();
+            
+            const successful = document.execCommand('copy');
+            document.body.removeChild(textArea);
+            
+            if (successful) {
+                this.showAlert('success', '链接已复制到剪贴板');
+            } else {
+                this.showAlert('error', '复制失败，请手动复制');
+            }
+        } catch (err) {
+            console.error('后备复制方法失败:', err);
+            this.showAlert('error', '复制失败，请手动复制链接');
+        }
+    }
+    
     // 分片上传相关方法
     async calculateMD5(file) {
         return new Promise((resolve, reject) => {
@@ -1688,14 +1758,22 @@ class NetdiskApp {
         
         // 计算文件路径
         let filePath = this.currentPath;
+        let fileName = file.name;
+        
         if (relativePath) {
             // 文件夹上传，使用相对路径
             const pathParts = relativePath.split('/');
-            pathParts.pop(); // 移除文件名
-            if (pathParts.length > 1) {
-                const dirPath = pathParts.slice(1).join('/'); // 移除第一个空元素
+            // webkitRelativePath 包含文件名，需要移除文件名获取目录路径  
+            const dirParts = pathParts.slice(0, -1); // 移除最后一个元素（文件名）
+            
+            if (dirParts.length > 0) {
+                // 连接目录路径
+                const dirPath = dirParts.join('/');
                 filePath = this.currentPath === '/' ? `/${dirPath}` : `${this.currentPath}/${dirPath}`;
             }
+            
+            // 使用，相对路径中的文件名
+            fileName = pathParts[pathParts.length - 1];
         }
         
         try {
@@ -1703,7 +1781,7 @@ class NetdiskApp {
             const initData = await this.api('/files/chunk/init', {
                 method: 'POST',
                 body: JSON.stringify({
-                    filename: file.name,
+                    filename: fileName,
                     file_size: file.size,
                     chunk_size: CHUNK_SIZE,
                     path: filePath

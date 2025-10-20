@@ -538,7 +538,7 @@ async def init_chunk_upload(
 @router.post("/chunk/upload", response_model=ChunkUploadResponse)
 async def upload_chunk(
     upload_id: str = Form(...),
-    chunk_index: int = Form(...),
+    chunk_index: str = Form(...),  # 改为str类型，手动转换
     chunk_hash: str = Form(""),
     chunk_file: UploadFile = File(...),
     current_user: User = Depends(get_current_user),
@@ -548,13 +548,33 @@ async def upload_chunk(
     try:
         chunk_service = ChunkUploadService(db)
         
+        # 转换chunk_index为整数
+        try:
+            chunk_index_int = int(chunk_index)
+        except ValueError:
+            return ChunkUploadResponse(
+                success=False,
+                message="无效的分片索引",
+                chunk_index=0,
+                received=False
+            )
+        
+        # 验证分片索引
+        if chunk_index_int < 0:
+            return ChunkUploadResponse(
+                success=False,
+                message="分片索引不能为负数",
+                chunk_index=chunk_index_int,
+                received=False
+            )
+        
         # 读取分片数据
         chunk_data = await chunk_file.read()
         
         # 上传分片
         success = chunk_service.upload_chunk(
             upload_id,
-            chunk_index,
+            chunk_index_int,
             chunk_data,
             current_user,
             chunk_hash if chunk_hash else None
@@ -563,15 +583,20 @@ async def upload_chunk(
         return ChunkUploadResponse(
             success=success,
             message="分片上传成功",
-            chunk_index=chunk_index,
+            chunk_index=chunk_index_int,
             received=True
         )
         
     except Exception as e:
+        chunk_index_int = 0
+        try:
+            chunk_index_int = int(chunk_index)
+        except:
+            pass
         return ChunkUploadResponse(
             success=False,
             message=f"分片上传失败: {str(e)}",
-            chunk_index=chunk_index,
+            chunk_index=chunk_index_int,
             received=False
         )
 
